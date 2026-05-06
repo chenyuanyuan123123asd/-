@@ -1,0 +1,33 @@
+{
+  "entities": {
+    "Property": {
+      "title": "Property",
+      "description": "Property listing data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "area": { "type": "string" },
+        "address": { "type": "string" },
+        "totalPrice": { "type": "string" },
+        "totalPriceRaw": { "type": "number" },
+        "downPayment": { "type": "string" },
+        "specs": { "type": "string" },
+        "status": { "type": "string" },
+        "features": { "type": "string" },
+        "details": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "name", "userId"]
+    }
+  },
+  "firestore": {
+    "/properties/{propertyId}": {
+      "schema": "Property",
+      "description": "Collection of properties"
+    }
+  }
+}

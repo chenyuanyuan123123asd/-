@@ -18,9 +18,32 @@ import {
   Loader2,
   ArrowRight,
   ClipboardList,
-  Camera
+  Camera,
+  Menu,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc, 
+  doc, 
+  onSnapshot, 
+  query, 
+  orderBy,
+  setDoc,
+  serverTimestamp
+} from 'firebase/firestore';
+import firebaseConfig from '../firebase-applet-config.json';
+
+// --- Firebase Initialization ---
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const auth = getAuth(app);
 
 // --- Types ---
 
@@ -115,13 +138,17 @@ export default function App() {
   const [profiles, setProfiles] = useState<ApiProfile[]>([]);
   const [profileName, setProfileName] = useState('');
   const [properties, setProperties] = useState<Property[]>([]);
-  const [models, setModels] = useState<string[]>(['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-2.0-flash-exp', 'claude-3.5-sonnet', 'claude-3.5-haiku', 'gpt-4o', 'gpt-4o-mini']);
+  const [user, setUser] = useState<any>(null);
+  const [authForm, setAuthForm] = useState({ username: '', password: '' });
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [models, setModels] = useState<string[]>(['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-2.0-flash-exp', 'deepseek-chat', 'deepseek-coder', 'claude-3.5-sonnet', 'claude-3.5-haiku', 'gpt-4o', 'gpt-4o-mini']);
   const [isConfigSaved, setIsConfigSaved] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isMatching, setIsMatching] = useState(false);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [extractText, setExtractText] = useState('');
   const [extractImage, setExtractImage] = useState<string | null>(null);
   const [filterArea, setFilterArea] = useState<string>('全部');
@@ -141,19 +168,37 @@ export default function App() {
     const savedConfig = localStorage.getItem(STORAGE_KEYS.CONFIG);
     if (savedConfig) setConfig(JSON.parse(savedConfig));
 
-    const savedProps = localStorage.getItem(STORAGE_KEYS.PROPERTIES);
-    if (savedProps) setProperties(JSON.parse(savedProps));
-
     const savedTheme = localStorage.getItem(STORAGE_KEYS.THEME) as ThemeMode;
     if (savedTheme && THEMES[savedTheme]) setTheme(savedTheme);
 
     const savedProfiles = localStorage.getItem('api_profiles');
     if (savedProfiles) setProfiles(JSON.parse(savedProfiles));
-  }, []);
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.PROPERTIES, JSON.stringify(properties));
-  }, [properties]);
+    // Auth Listener
+    const unsubsAuth = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u) {
+        // Sync User specific properties
+        const q = query(collection(db, 'properties'), orderBy('createdAt', 'desc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          const props: Property[] = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          } as Property));
+          setProperties(props);
+        }, (err) => {
+          setError(`Firebase 同步失败: ${err.message}`);
+        });
+        return () => unsubscribe();
+      } else {
+        setProperties([]);
+      }
+    });
+
+    return () => {
+      unsubsAuth();
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('api_profiles', JSON.stringify(profiles));
@@ -170,6 +215,38 @@ export default function App() {
     setIsConfigSaved(true);
     setTimeout(() => setIsConfigSaved(false), 2000);
     setError(null);
+  };
+
+  const handleAuth = async () => {
+    if (!authForm.username || !authForm.password) {
+      setError('请输入用户名和密码');
+      return;
+    }
+    
+    setIsAuthLoading(true);
+    setError(null);
+    const email = `${authForm.username}@house-expert.local`;
+    
+    try {
+      try {
+        await signInWithEmailAndPassword(auth, email, authForm.password);
+      } catch (err: any) {
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+          // Attempt simple creation logic
+          await createUserWithEmailAndPassword(auth, email, authForm.password);
+        } else {
+          throw err;
+        }
+      }
+    } catch (err: any) {
+      setError(`登录/注册失败: ${err.message}`);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    signOut(auth);
   };
 
   const handleSaveProfile = () => {
@@ -268,7 +345,7 @@ export default function App() {
           messages: [
             { 
               role: 'system', 
-              content: '你是一个数据提取专家。请从用户输入的房地产销售笔记或图片中提取关键信息。必须输出纯 JSON 格式，不要包裹 Markdown 代码块。字段包含：项目名、区域、地址、总价（如“300万”）、总价数值（纯数字，取区间均值）、首付、面积与户型、交房状态、核心卖点、附近配套（如交通、商场，如果没有则留空）。请尽量将价格标准化为单一数值以便匹配。' 
+              content: '你是一个上海房地产数据提取专家。请从用户输入的房地产销售笔记或图片中提取关键信息。必须输出纯 JSON 格式，不要包裹 Markdown 代码块。字段包含：项目名、区域（必须精确到区，如“徐汇”、“静安”、“浦东”，不要包含细分板块）、地址、总价（如“300万”）、总价数值（纯数字，取区间均值）、首付、面积与户型、交房状态、核心卖点、附近配套（如交通、商场，如果没有则留空）。请尽量将价格标准化为单一数值以便匹配。' 
             },
             { role: 'user', content: userContent }
           ]
@@ -285,8 +362,7 @@ export default function App() {
       const jsonStr = cleanJson(content);
       const extracted: ExtractionResult = JSON.parse(jsonStr);
 
-      const newProperty: Property = {
-        id: Date.now().toString(),
+      const propData = {
         name: ensureString(extracted.项目名),
         area: ensureString(extracted.区域),
         address: ensureString(extracted.地址),
@@ -297,10 +373,12 @@ export default function App() {
         status: ensureString(extracted.交房状态),
         sellingPoints: ensureString(extracted.核心卖点),
         nearbyFacilities: ensureString(extracted.附近配套),
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        userId: auth.currentUser?.uid || 'anonymous'
       };
 
-      setProperties(prev => [newProperty, ...prev]);
+      await addDoc(collection(db, 'properties'), propData);
+
       setExtractText('');
       setExtractImage(null);
       setActiveTab('database');
@@ -473,13 +551,22 @@ export default function App() {
     );
   };
 
-  const deleteProperty = (id: string) => {
-    setProperties(prev => prev.filter(p => p.id !== id));
+  const deleteProperty = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'properties', id));
+    } catch (err: any) {
+      setError(`删除失败: ${err.message}`);
+    }
   };
 
-  const updateProperty = (updated: Property) => {
-    setProperties(prev => prev.map(p => p.id === updated.id ? updated : p));
-    setEditingProp(null);
+  const updateProperty = async (updated: Property) => {
+    try {
+      const { id, ...data } = updated;
+      await updateDoc(doc(db, 'properties', id), data as any);
+      setEditingProp(null);
+    } catch (err: any) {
+      setError(`更新失败: ${err.message}`);
+    }
   };
 
   const suggestAmenities = async (prop: Property) => {
@@ -523,6 +610,84 @@ export default function App() {
     return 'bg-slate-400';
   };
 
+  if (!user) {
+    return (
+      <div className={`min-h-screen ${t.bg} flex items-center justify-center p-4`}>
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-white rounded-[3rem] p-10 md:p-12 shadow-2xl border-4 border-white"
+        >
+          <div className="text-center space-y-4 mb-10">
+            <div className={`w-20 h-20 mx-auto ${t.secondary} rounded-[2rem] flex items-center justify-center text-white shadow-2xl rotate-6`}>
+              <Sparkles className="w-10 h-10" />
+            </div>
+            <h1 className="text-3xl font-serif font-black text-slate-800">上海房产智库</h1>
+            <p className="text-slate-400 font-medium italic">输入用户名即可锁定您的云端房源</p>
+          </div>
+
+          {error && (
+            <div className="mb-8 p-6 bg-rose-50 border-2 border-rose-100 rounded-3xl text-rose-500 text-xs font-bold leading-relaxed">
+              <div className="flex items-center gap-2 mb-2">
+                <X className="w-4 h-4" />
+                <span>操作失败</span>
+              </div>
+              {error.includes('auth/operation-not-allowed') ? (
+                <div className="space-y-2">
+                  <p>需要手动激活云端：</p>
+                  <a 
+                    href="https://console.firebase.google.com/project/gen-lang-client-0844792406/authentication/providers" 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="block p-2 bg-rose-500 text-white rounded-lg text-center"
+                  >
+                    点击前往开启 "Email/Password" 选项
+                  </a>
+                  <p className="opacity-70">开启后刷新此页面即可登录成功。</p>
+                </div>
+              ) : error}
+            </div>
+          )}
+
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">用户名（自定义）</label>
+              <input 
+                type="text"
+                value={authForm.username}
+                onChange={e => setAuthForm(prev => ({ ...prev, username: e.target.value }))}
+                placeholder="我的专属小店"
+                className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-theme-primary/10 transition-all font-bold text-sm"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">进入密码</label>
+              <input 
+                type="password"
+                value={authForm.password}
+                onChange={e => setAuthForm(prev => ({ ...prev, password: e.target.value }))}
+                placeholder="••••••••"
+                className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-theme-primary/10 transition-all font-bold text-sm"
+              />
+            </div>
+            <button 
+              onClick={handleAuth}
+              disabled={isAuthLoading}
+              className={`w-full py-5 ${t.secondary} text-white rounded-[2rem] font-black text-lg shadow-2xl shadow-slate-200 hover:-translate-y-1 active:scale-95 transition-all flex items-center justify-center gap-3`}
+            >
+              {isAuthLoading ? <Loader2 className="animate-spin" /> : <ArrowRight />}
+              开启私有空间
+            </button>
+          </div>
+          
+          <p className="mt-8 text-center text-[10px] text-slate-300 font-bold uppercase tracking-widest">
+            Cloud Persistence Active
+          </p>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className={`min-h-screen ${t.gradient} text-slate-800 font-sans selection:bg-black/5 selection:text-slate-900 transition-colors duration-700`}>
       {/* Header */}
@@ -538,6 +703,20 @@ export default function App() {
             </div>
           </div>
           
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col items-end mr-4 hidden md:flex">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{user.email?.split('@')[0]}</span>
+              <button onClick={handleLogout} className="text-[10px] font-black text-rose-500 uppercase tracking-widest hover:underline">退出登录</button>
+            </div>
+            <div className="flex bg-slate-100/50 p-1 rounded-full md:hidden">
+            <button 
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className={`p-3 rounded-full transition-all ${isMobileMenuOpen ? `${t.secondary} text-white` : 'text-slate-500'}`}
+            >
+              {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
+          </div>
+
           <nav className="hidden md:flex bg-white/50 backdrop-blur-md p-1.5 rounded-full border border-white/60 shadow-lg">
             {[
               { id: 'database', label: '房源管理', icon: Database },
@@ -562,7 +741,70 @@ export default function App() {
             ))}
           </nav>
         </div>
-      </header>
+      </div>
+    </header>
+
+      {/* Mobile Sidebar Menu */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[60] md:hidden"
+            />
+            <motion.div 
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              className="fixed top-0 right-0 h-full w-3/4 bg-white z-[70] md:hidden shadow-2xl p-8 flex flex-col"
+            >
+              <div className="flex items-center justify-between mb-12">
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 ${t.secondary} rounded-lg flex items-center justify-center text-white`}>
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <span className="font-serif font-black text-slate-800">上海房产智库</span>
+                </div>
+                <button onClick={() => setIsMobileMenuOpen(false)}>
+                  <X className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+              <div className="space-y-6">
+                {[
+                  { id: 'database', label: '房源管理', icon: Database },
+                  { id: 'input', label: 'AI 录入', icon: Plus },
+                  { id: 'match', label: '客户匹配', icon: Search },
+                  { id: 'broadcast', label: '群发助手', icon: Send },
+                  { id: 'config', label: '系统设置', icon: Settings }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveTab(tab.id as any);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`
+                      w-full flex items-center gap-4 px-6 py-5 rounded-[2rem] transition-all text-sm font-black uppercase tracking-widest
+                      ${activeTab === tab.id 
+                        ? `${t.secondary} text-white shadow-xl` 
+                        : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}
+                    `}
+                  >
+                    <tab.icon className="w-5 h-5" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-auto pt-10 border-t border-slate-50">
+                 <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest text-center">Version 2.0 Cloud Sync</p>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <main className="max-w-6xl mx-auto p-4 md:p-10 relative overflow-hidden">
         {/* Error Alert */}
@@ -686,12 +928,20 @@ export default function App() {
 
                 <div className="grid md:grid-cols-2 gap-8">
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">API 终端</label>
+                    <div className="flex items-center justify-between ml-1">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">API 终端</label>
+                      <button 
+                        onClick={() => setConfig(prev => ({ ...prev, url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-chat' }))}
+                        className="text-[10px] font-black text-blue-500 hover:text-blue-600 underline underline-offset-4"
+                      >
+                        使用 DeepSeek 官方预设
+                      </button>
+                    </div>
                     <input 
                       type="text" 
                       value={config.url}
                       onChange={e => setConfig(prev => ({ ...prev, url: e.target.value }))}
-                      placeholder="OpenAI 兼容接口地址"
+                      placeholder="OpenAI 兼容接口地址 (含 /chat/completions)"
                       className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-theme-primary/10 transition-all font-mono text-sm leading-relaxed"
                     />
                   </div>
@@ -734,12 +984,15 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="pt-6 flex items-center justify-between border-t border-slate-50">
-                  <p className="text-xs text-slate-400 font-medium italic">所有的 API 数据仅保存在您的当前浏览器 localStorage 中。</p>
+                <div className="pt-6 flex flex-col md:flex-row items-center justify-between gap-6 border-t border-slate-50">
+                  <div className="space-y-1 text-center md:text-left">
+                    <p className="text-xs text-slate-400 font-medium italic">房源数据已同步至 Firebase 云端，API 密钥保留在本地。</p>
+                    <p className="text-[10px] text-slate-300">如果提示 Auth 错误，请确保在 Firebase 控制台已开启匿名登录。</p>
+                  </div>
                   <button 
                     onClick={handleSaveConfig}
                     className={`
-                      px-12 py-5 rounded-3xl font-black text-lg flex items-center gap-3 transition-all shadow-2xl
+                      w-full md:w-auto px-12 py-5 rounded-3xl font-black text-lg flex items-center justify-center gap-3 transition-all shadow-2xl
                       ${isConfigSaved 
                         ? 'bg-emerald-500 text-white shadow-emerald-200' 
                         : `${t.secondary} text-white shadow-slate-200 hover:-translate-y-1 active:translate-y-0`}
@@ -803,17 +1056,17 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="flex flex-wrap items-center justify-center gap-6">
-                  <label className={`cursor-pointer flex items-center gap-3 px-8 py-6 bg-white border-2 border-slate-100 rounded-[2rem] text-slate-800 font-black shadow-xl hover:-translate-y-1 transition-all active:scale-95`}>
-                     <Camera className="w-6 h-6" />
-                     {extractImage ? '重新拍摄/上传' : '图片/截图识房'}
+                <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
+                  <label className={`cursor-pointer flex items-center gap-3 px-6 md:px-8 py-5 md:py-6 bg-white border-2 border-slate-100 rounded-3xl md:rounded-[2rem] text-slate-800 font-black shadow-xl hover:-translate-y-1 transition-all active:scale-95 text-sm md:text-base`}>
+                     <Camera className="w-5 h-5 md:w-6 md:h-6" />
+                     {extractImage ? '重新拍摄' : '图片识房'}
                      <input type="file" accept="image/*" className="hidden" onChange={handleExtractImage} />
                   </label>
 
                   <button 
                     onClick={aiExtract}
                     disabled={isExtracting || (!extractText.trim() && !extractImage)}
-                    className={`group px-16 py-6 ${t.secondary} disabled:bg-slate-200 text-white rounded-[2rem] font-black text-xl flex items-center gap-4 transition-all shadow-2xl shadow-slate-300 hover:-translate-y-1 active:translate-y-0`}
+                    className={`group px-10 md:px-16 py-5 md:py-6 ${t.secondary} disabled:bg-slate-200 text-white rounded-3xl md:rounded-[2rem] font-black text-lg md:text-xl flex items-center gap-4 transition-all shadow-2xl shadow-slate-300 hover:-translate-y-1 active:translate-y-0`}
                   >
                     {isExtracting ? (
                       <Loader2 className="w-7 h-7 animate-spin" />
@@ -861,7 +1114,10 @@ export default function App() {
 
               {/* District Filter Slider */}
               <div className="flex items-center gap-3 overflow-x-auto pb-4 px-2 scrollbar-hide">
-                {['全部', ...Array.from(new Set(properties.map(p => p.area.split(/[,，/ \s]/)[0] || '未知')))].map(area => (
+                {['全部', ...Array.from(new Set(properties.map(p => {
+                   const district = p.area.replace(/区$/, '');
+                   return district;
+                })))].filter(Boolean).map(area => (
                   <button
                     key={area}
                     onClick={() => setFilterArea(area)}
@@ -1254,26 +1510,29 @@ export default function App() {
         </div>
       </main>
 
-      {/* Mobile Navigation */}
+      {/* Mobile Navigation (Floating Bottom Bar) */}
       <footer className="md:hidden fixed bottom-8 left-1/2 -translate-x-1/2 w-[90%] z-50">
-        <nav className="bg-slate-900/90 backdrop-blur-3xl p-3 rounded-[2.5rem] border border-white/20 shadow-2xl flex items-center justify-around">
+        <nav className="bg-slate-900/90 backdrop-blur-3xl p-2 rounded-full border border-white/20 shadow-2xl flex items-center justify-around">
           {[
             { id: 'database', icon: Database },
             { id: 'input', icon: Plus },
             { id: 'match', icon: Search },
-            { id: 'config', icon: Settings }
+            { id: 'broadcast', icon: Send }
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`p-5 rounded-3xl transition-all relative ${activeTab === tab.id ? `${t.secondary} text-white shadow-2xl scale-110` : 'text-slate-500 hover:text-slate-300'}`}
+              className={`p-4 rounded-full transition-all relative ${activeTab === tab.id ? `${t.secondary} text-white shadow-xl` : 'text-slate-500 hover:text-slate-300'}`}
             >
-              <tab.icon className="w-7 h-7" />
-              {activeTab === tab.id && (
-                 <motion.div layoutId="mob-nav" className="absolute inset-0 bg-white/10 rounded-3xl -z-10" />
-              )}
+              <tab.icon className="w-6 h-6" />
             </button>
           ))}
+          <button 
+            onClick={() => setActiveTab('config')}
+            className={`p-4 rounded-full transition-all ${activeTab === 'config' ? `${t.secondary} text-white shadow-xl` : 'text-slate-500'}`}
+          >
+            <Settings className="w-6 h-6" />
+          </button>
         </nav>
       </footer>
 
