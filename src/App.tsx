@@ -47,6 +47,13 @@ const auth = getAuth(app);
 
 // --- Types ---
 
+declare global {
+  interface Window {
+    AMap: any;
+    _AMapSecurityConfig: any;
+  }
+}
+
 interface ApiConfig {
   url: string;
   key: string;
@@ -150,13 +157,13 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [extractText, setExtractText] = useState('');
-  const [extractImage, setExtractImage] = useState<string | null>(null);
+  const [extractImages, setExtractImages] = useState<string[]>([]);
   const [filterArea, setFilterArea] = useState<string>('全部');
   const [matchRequest, setMatchRequest] = useState('');
   const [matchMode, setMatchMode] = useState<'concise' | 'professional'>('concise');
   const [matchHistory, setMatchHistory] = useState<MatchMessage[]>([]);
   const [broadcastResult, setBroadcastResult] = useState('');
-  const [broadcastMode, setBroadcastMode] = useState<'short' | 'detailed' | 'template'>('short');
+  const [broadcastMode, setBroadcastMode] = useState<'auto' | 'template'>('auto');
   const [broadcastTemplate, setBroadcastTemplate] = useState('');
   const [selectedPropIds, setSelectedPropIds] = useState<string[]>([]);
   const [editingProp, setEditingProp] = useState<Property | null>(null);
@@ -249,6 +256,35 @@ export default function App() {
     signOut(auth);
   };
 
+  const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
+  const [isSuggestionOpen, setIsSuggestionOpen] = useState(false);
+
+  // AMap Autocomplete Implementation
+  useEffect(() => {
+    if (!editingProp || !editingProp.address || editingProp.address.length < 2) {
+      setAddressSuggestions([]);
+      setIsSuggestionOpen(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (window.AMap && window.AMap.Autocomplete) {
+        const auto = new window.AMap.Autocomplete({
+          city: '上海',
+          citylimit: true
+        });
+        auto.search(editingProp.address, (status: string, result: any) => {
+          if (status === 'complete' && result.tips) {
+            setAddressSuggestions(result.tips.filter((t: any) => t.id));
+            setIsSuggestionOpen(true);
+          }
+        });
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [editingProp?.address]);
+
   const handleSaveProfile = () => {
     if (!profileName.trim()) {
       setError('请输入配置名称');
@@ -314,7 +350,7 @@ export default function App() {
   };
 
   const aiExtract = async () => {
-    if (!extractText.trim() && !extractImage) return;
+    if (!extractText.trim() && extractImages.length === 0) return;
     setIsExtracting(true);
     setError(null);
 
@@ -323,15 +359,13 @@ export default function App() {
       if (extractText.trim()) {
         userContent.push({ type: 'text', text: extractText });
       }
-      if (extractImage) {
-        // Extract base64 and mime type
-        const matches = extractImage.match(/^data:(image\/[a-z]+);base64,(.+)$/);
-        if (matches) {
-           userContent.push({
-             type: 'image_url',
-             image_url: { url: extractImage }
-           });
-        }
+      if (extractImages.length > 0) {
+        extractImages.forEach(img => {
+          userContent.push({
+            type: 'image_url',
+            image_url: { url: img }
+          });
+        });
       }
 
       const response = await fetch(config.url, {
@@ -345,7 +379,7 @@ export default function App() {
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产数据提取专家。请从用户输入的房地产销售笔记或图片中提取关键信息。必须输出纯 JSON 格式，不要包裹 Markdown 代码块。字段包含：项目名、区域（必须精确到区，如“徐汇”、“静安”、“浦东”，不要包含细分板块）、地址、总价（如“300万”）、总价数值（纯数字，取区间均值）、首付、面积与户型、交房状态、核心卖点、附近配套（如交通、商场，如果没有则留空）。请尽量将价格标准化为单一数值以便匹配。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】（如宣传海报、VR 截图、销售笔记等）中提取深度房源信息。必须输出纯 JSON 格式。字段包含：项目名、区域（必须是如“徐汇”、“闵行”等标准行政区）、地址（尽量提取详细门牌号）、总价（如“450万”）、总价数值（用于排序的纯数字）、首付、面积与户型、交房状态、核心卖点（提取最诱人的 2-3 点）、附近配套（交通、学校、商圈）。即使信息零散，也请发挥逻辑推断能力进行整合。' 
             },
             { role: 'user', content: userContent }
           ]
@@ -380,7 +414,7 @@ export default function App() {
       await addDoc(collection(db, 'properties'), propData);
 
       setExtractText('');
-      setExtractImage(null);
+      setExtractImages([]);
       setActiveTab('database');
     } catch (err: any) {
       setError(`AI 解析失败: ${err.message}`);
@@ -446,19 +480,34 @@ export default function App() {
   };
 
   const handleExtractImage = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     
-    if (file.size > 2 * 1024 * 1024) {
-      setError('图片超过 2MB，请压缩后再试');
+    if (extractImages.length + files.length > 18) {
+      setError('单次最多选择 18 张图片');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setExtractImage(event.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    const readers = files.map(file => {
+      return new Promise<string>((resolve, reject) => {
+        if (file.size > 4 * 1024 * 1024) {
+          reject(new Error(`${file.name} 超过 4MB`));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(event.target?.result as string);
+        reader.onerror = () => reject(new Error('读取失败'));
+        reader.readAsDataURL(file);
+      });
+    });
+
+    Promise.all(readers)
+      .then(newImages => {
+        setExtractImages(prev => [...prev, ...newImages]);
+      })
+      .catch(err => {
+        setError(err.message);
+      });
   };
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>, field: 'imageUrl' | 'videoUrl') => {
@@ -491,20 +540,24 @@ export default function App() {
       const selectedProps = properties.filter(p => selectedPropIds.includes(p.id));
       
       let systemPrompt = '';
-      if (broadcastMode === 'short') {
-        systemPrompt = `你是一个房地产自媒体运营专家。请为选中的房源生成一段极具诱惑力的【短消息】群发文案。
-        规则：
-        1. 字数精简，每条房源 2-3 行。
-        2. 使用爆款 Emoji（🔥, 🏠, 💰）。
-        3. 严禁使用 Markdown 符号（如 ** 等）。
-        4. 包含“随时看房，专车接送”。`;
-      } else if (broadcastMode === 'detailed') {
-        systemPrompt = `你是一个房地产自媒体运营专家。请为选中的房源生成一段极具诱惑力的【长文案】群发文案。
-        规则：
-        1. 详细描述核心卖点、价格特惠。
-        2. 使用丰富的 Emoji，分段清晰。
-        3. 包含仪式感标题（如“今日爆款项目推荐”）。
-        4. 严禁使用 Markdown 符号（如 ** 等）。`;
+      if (broadcastMode === 'auto') {
+        if (selectedPropIds.length === 1) {
+          systemPrompt = `你是一个上海顶级豪宅经纪人，擅长在朋友圈发【捡漏爆款】消息。
+          目标：为这【一个】房源生成极具视觉冲击力的短讯。
+          要求：
+          1. 第一行配合 Emoji 突出最强卖点（如：🔥送25平私人露台、🏠最后清盘、捡漏王炸）。
+          2. 核心参数精简：区域、板块名称、通燃气/民水民电（如有）、房型得房率、原价与现价对比。
+          3. 结尾话术：“您今天可以看一下房子吗？” 或 “手慢无，随时专车接送”。
+          4. 风格：禁忌废话，排版要透气，多用 [庆祝][嘿哈][色] 等 Emoji。`;
+        } else {
+          systemPrompt = `你是一个房产社群管家。请将选中的【多个房源】整理成一份精品清盘清单。
+          要求：
+          1. 头部问候：简短自然（如：晚上好，整理一些内部高性价比房源，发您看看）。
+          2. 房源排版：使用数字图标 1️⃣, 2️⃣... 每一个房源是一个独立块。
+          3. 结构：项目名+板块、面积、总价、核心标签（如 ✅通燃气 ✅内环内）、交通信息（如地铁0距离）。
+          4. 结尾总结：“需要资料请回复编号1-3🌈，或者随时看房，有专车接送”。
+          5. 严禁 Markdown 粗体，保持纯文字+Emoji。`;
+        }
       } else if (broadcastMode === 'template') {
         systemPrompt = `你是一个房地产自媒体运营专家。请根据用户提供的【模版】，将其中占位符（如 {项目名}, {总价}, {区域} 等）替换为选中房源的实际信息。
         用户模版：${broadcastTemplate}
@@ -622,8 +675,11 @@ export default function App() {
             <div className={`w-20 h-20 mx-auto ${t.secondary} rounded-[2rem] flex items-center justify-center text-white shadow-2xl rotate-6`}>
               <Sparkles className="w-10 h-10" />
             </div>
-            <h1 className="text-3xl font-serif font-black text-slate-800">上海房产智库</h1>
-            <p className="text-slate-400 font-medium italic">输入用户名即可锁定您的云端房源</p>
+            <div className="space-y-1">
+              <h1 className="text-3xl font-serif font-black text-slate-800">沪公寓助手</h1>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">APARTMENT ASSISTANT</p>
+            </div>
+            <p className="text-slate-400 font-medium italic pt-4 px-4">输入用户名即可锁定您的云端房源</p>
           </div>
 
           {error && (
@@ -633,17 +689,18 @@ export default function App() {
                 <span>操作失败</span>
               </div>
               {error.includes('auth/operation-not-allowed') ? (
-                <div className="space-y-2">
-                  <p>需要手动激活云端：</p>
+                <div className="space-y-3">
+                  <p className="text-sm">云端同步未激活：</p>
+                  <p className="opacity-80 italic">请在 Firebase 控制台的 "Authentication &rarr; Sign-in method" 中开启 "Email/Password" 登录方式。</p>
                   <a 
                     href="https://console.firebase.google.com/project/gen-lang-client-0844792406/authentication/providers" 
                     target="_blank" 
                     rel="noreferrer"
-                    className="block p-2 bg-rose-500 text-white rounded-lg text-center"
+                    className="block p-3 bg-rose-500 text-white rounded-xl text-center font-black active:scale-95 transition-all shadow-lg"
                   >
-                    点击前往开启 "Email/Password" 选项
+                    前往开启密码登录
                   </a>
-                  <p className="opacity-70">开启后刷新此页面即可登录成功。</p>
+                  <p className="opacity-70 text-[10px] text-center">开启后返回并刷新本页即可使用。</p>
                 </div>
               ) : error}
             </div>
@@ -766,7 +823,10 @@ export default function App() {
                   <div className={`w-8 h-8 ${t.secondary} rounded-lg flex items-center justify-center text-white`}>
                     <Sparkles className="w-4 h-4" />
                   </div>
-                  <span className="font-serif font-black text-slate-800">上海房产智库</span>
+                  <div>
+                    <h1 className="font-serif font-black text-slate-800 text-base leading-none">沪公寓助手</h1>
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1">APARTMENT ASSISTANT</p>
+                  </div>
                 </div>
                 <button onClick={() => setIsMobileMenuOpen(false)}>
                   <X className="w-6 h-6 text-slate-400" />
@@ -806,7 +866,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <main className="max-w-6xl mx-auto p-4 md:p-10 relative overflow-hidden">
+      <main className="max-w-6xl mx-auto p-4 md:p-10 pb-40 md:pb-10 relative overflow-hidden">
         {/* Error Alert */}
         <AnimatePresence>
           {error && (
@@ -930,12 +990,6 @@ export default function App() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between ml-1">
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">API 终端</label>
-                      <button 
-                        onClick={() => setConfig(prev => ({ ...prev, url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-chat' }))}
-                        className="text-[10px] font-black text-blue-500 hover:text-blue-600 underline underline-offset-4"
-                      >
-                        使用 DeepSeek 官方预设
-                      </button>
                     </div>
                     <input 
                       type="text" 
@@ -1024,9 +1078,9 @@ export default function App() {
                 <div className={`w-16 h-16 ${t.secondary} rounded-full flex items-center justify-center text-white shadow-xl mb-2 ring-8 ring-white/50`}>
                    <Sparkles className="w-8 h-8" />
                 </div>
-                <h2 className="text-3xl font-black text-slate-800 font-serif tracking-tight">智能数据录入</h2>
+                <h2 className="text-3xl font-black text-slate-800 font-serif tracking-tight">智能信息识别</h2>
                 <p className="text-slate-400 text-sm max-w-md font-medium leading-relaxed">
-                   粘贴销售笔记或群消息，AI 将自动分析并录入房源库。
+                   粘贴销售笔记或群消息，甚至上传多张推介图片，AI 将自动分析并录入房源库。
                 </p>
               </div>
 
@@ -1038,20 +1092,30 @@ export default function App() {
                     placeholder="例如：\n【项目名】xx公馆，外环外，500w起，精装交付\n配套有地铁11号线，自带2w方商业...\n本月还有特价房..."
                     className="w-full h-80 px-8 py-8 bg-slate-50/70 border-2 border-slate-100 rounded-[2.5rem] focus:outline-none focus:border-slate-800 transition-all text-slate-800 resize-none font-medium text-xl leading-relaxed shadow-inner placeholder:text-slate-300"
                   />
-                  {!extractText && !extractImage && (
+                  {!extractText && extractImages.length === 0 && (
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-20 hidden md:block group-hover:scale-110 transition-transform">
                       <ClipboardList className={`w-32 h-32 ${t.primary}`} />
                     </div>
                   )}
-                  {extractImage && (
-                    <div className="absolute top-8 right-10 z-10 w-48 h-48 rounded-3xl overflow-hidden shadow-2xl border-4 border-white rotate-3">
-                      <img src={extractImage} className="w-full h-full object-cover" />
-                      <button 
-                         onClick={() => setExtractImage(null)}
-                         className="absolute top-2 right-2 bg-rose-500 text-white p-1.5 rounded-full shadow-lg"
-                      >
-                         <Plus className="w-4 h-4 rotate-45" />
-                      </button>
+                  {extractImages.length > 0 && (
+                    <div className="mt-8 grid grid-cols-3 md:grid-cols-6 lg:grid-cols-9 gap-4">
+                      {extractImages.map((img, idx) => (
+                        <div key={idx} className="relative group/img aspect-square rounded-2xl overflow-hidden border-2 border-white shadow-lg">
+                          <img src={img} className="w-full h-full object-cover" />
+                          <button 
+                             onClick={() => setExtractImages(prev => prev.filter((_, i) => i !== idx))}
+                             className="absolute top-1 right-1 bg-rose-500 text-white p-1 rounded-full shadow-lg opacity-0 group-hover/img:opacity-100 transition-opacity"
+                          >
+                             <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                      {extractImages.length < 18 && (
+                        <label className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-all group/add">
+                           <Plus className="w-6 h-6 text-slate-300 group-hover/add:text-slate-400" />
+                           <input type="file" accept="image/*" multiple className="hidden" onChange={handleExtractImage} />
+                        </label>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1059,13 +1123,13 @@ export default function App() {
                 <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
                   <label className={`cursor-pointer flex items-center gap-3 px-6 md:px-8 py-5 md:py-6 bg-white border-2 border-slate-100 rounded-3xl md:rounded-[2rem] text-slate-800 font-black shadow-xl hover:-translate-y-1 transition-all active:scale-95 text-sm md:text-base`}>
                      <Camera className="w-5 h-5 md:w-6 md:h-6" />
-                     {extractImage ? '重新拍摄' : '图片识房'}
-                     <input type="file" accept="image/*" className="hidden" onChange={handleExtractImage} />
+                     {extractImages.length > 0 ? '添加图片' : '识别图片信息'}
+                     <input type="file" accept="image/*" multiple className="hidden" onChange={handleExtractImage} />
                   </label>
 
                   <button 
                     onClick={aiExtract}
-                    disabled={isExtracting || (!extractText.trim() && !extractImage)}
+                    disabled={isExtracting || (!extractText.trim() && extractImages.length === 0)}
                     className={`group px-10 md:px-16 py-5 md:py-6 ${t.secondary} disabled:bg-slate-200 text-white rounded-3xl md:rounded-[2rem] font-black text-lg md:text-xl flex items-center gap-4 transition-all shadow-2xl shadow-slate-300 hover:-translate-y-1 active:translate-y-0`}
                   >
                     {isExtracting ? (
@@ -1105,7 +1169,24 @@ export default function App() {
                   </span>
                 </div>
                 <button 
-                  onClick={() => setActiveTab('input')}
+                  onClick={() => {
+                    setEditingProp({
+                      id: '',
+                      name: '',
+                      area: '',
+                      address: '',
+                      totalPrice: '',
+                      totalPriceValue: 0,
+                      downPayment: '',
+                      layout: '',
+                      status: '待定',
+                      sellingPoints: '',
+                      nearbyFacilities: '',
+                      imageUrl: '',
+                      videoUrl: '',
+                      createdAt: Date.now()
+                    });
+                  }}
                   className={`flex items-center gap-2 text-sm font-black ${t.primary} bg-white px-5 py-2.5 rounded-2xl shadow-sm hover:shadow-md transition-all border border-slate-50`}
                 >
                   <Plus className="w-4 h-4" /> 录入房源
@@ -1407,8 +1488,7 @@ export default function App() {
 
                 <div className="flex bg-slate-100 p-1.5 rounded-2xl">
                   {[
-                    { id: 'short', label: '短消息' },
-                    { id: 'detailed', label: '长文案' },
+                    { id: 'auto', label: '自动生成' },
                     { id: 'template', label: '套用模板' }
                   ].map(mode => (
                     <button 
@@ -1511,8 +1591,8 @@ export default function App() {
       </main>
 
       {/* Mobile Navigation (Floating Bottom Bar) */}
-      <footer className="md:hidden fixed bottom-8 left-1/2 -translate-x-1/2 w-[90%] z-50">
-        <nav className="bg-slate-900/90 backdrop-blur-3xl p-2 rounded-full border border-white/20 shadow-2xl flex items-center justify-around">
+      <footer className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] z-50">
+        <nav className="bg-slate-900/95 backdrop-blur-2xl p-2 rounded-full border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center justify-around">
           {[
             { id: 'database', icon: Database },
             { id: 'input', icon: Plus },
@@ -1581,15 +1661,53 @@ export default function App() {
                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
                          />
                        </div>
-                       <div className="col-span-full space-y-3">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">详细地理位置</label>
-                         <input 
-                           value={editingProp.address || ''}
-                           onChange={e => setEditingProp({ ...editingProp, address: e.target.value })}
-                           placeholder="输入完整地址以便 AI 智能匹配配套"
-                           className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
-                         />
-                       </div>
+                        <div className="col-span-full space-y-3 relative">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">详细地理位置 (关联高德数据)</label>
+                          <div className="relative group/addr">
+                            <input 
+                              value={editingProp.address || ''}
+                              onChange={e => setEditingProp({ ...editingProp, address: e.target.value })}
+                              onFocus={() => editingProp.address && setIsSuggestionOpen(true)}
+                              onBlur={() => setTimeout(() => setIsSuggestionOpen(false), 200)}
+                              placeholder="输入地址或 POI 名称，自动联想补全..."
+                              className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-[2rem] focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/30 outline-none transition-all font-bold text-slate-800 text-lg shadow-sm"
+                            />
+                            <div className="absolute right-6 top-1/2 -translate-y-1/2">
+                               <Search className="w-5 h-5 text-slate-300" />
+                            </div>
+                            
+                            {/* Suggestions Dropdown */}
+                            <AnimatePresence>
+                               {isSuggestionOpen && addressSuggestions.length > 0 && (
+                                 <motion.div 
+                                   initial={{ opacity: 0, y: 10 }}
+                                   animate={{ opacity: 1, y: 0 }}
+                                   exit={{ opacity: 0, y: 10 }}
+                                   className="absolute left-0 right-0 top-full mt-2 bg-white rounded-3xl shadow-2xl border border-slate-100 z-[110] max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide py-2"
+                                 >
+                                   {addressSuggestions.map((tip, idx) => (
+                                     <button
+                                       key={idx}
+                                       type="button"
+                                       onClick={() => {
+                                         setEditingProp({ 
+                                           ...editingProp, 
+                                           address: tip.district + tip.address + tip.name,
+                                           area: tip.district.replace('上海市', '').split('区')[0] + '区'
+                                         });
+                                         setIsSuggestionOpen(false);
+                                       }}
+                                       className="w-full text-left px-6 py-4 hover:bg-slate-50 transition-colors flex flex-col border-b border-slate-50 last:border-0"
+                                     >
+                                       <span className="font-bold text-slate-800 text-sm truncate">{tip.name}</span>
+                                       <span className="text-[10px] text-slate-400 font-medium truncate">{tip.district} {tip.address}</span>
+                                     </button>
+                                   ))}
+                                 </motion.div>
+                               )}
+                            </AnimatePresence>
+                          </div>
+                        </div>
                        <div className="space-y-3">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">价格/区间描述</label>
                          <input 
