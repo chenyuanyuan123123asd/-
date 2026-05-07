@@ -19,6 +19,7 @@ import {
   ArrowRight,
   ClipboardList,
   Camera,
+  Download,
   Menu,
   X
 } from 'lucide-react';
@@ -80,6 +81,9 @@ interface Property {
   nearbyFacilities?: string;
   imageUrl?: string;
   videoUrl?: string;
+  saleFloor?: string; // 在售楼层
+  saleArea?: string;  // 在售面积
+  projectBrief?: string; // 项目资料
   createdAt: number;
 }
 
@@ -99,6 +103,9 @@ interface ExtractionResult {
   交房状态: string;
   核心卖点: string;
   附近配套?: string;
+  在售楼层?: string;
+  在售面积?: string;
+  项目资料?: string;
 }
 
 type ThemeMode = 'pink' | 'purple' | 'blue' | 'yellow' | 'green' | 'orange' | 'teal' | 'indigo';
@@ -285,6 +292,41 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [editingProp?.address]);
 
+  const downloadProjectBrief = (prop: Property) => {
+    const content = `
+【项目名称】：${prop.name}
+【所属板块】：${prop.area}
+【详细地址】：${prop.address || '暂无'}
+【在售楼层】：${prop.saleFloor || '暂无'}
+【在售面积】：${prop.saleArea || '暂无'}
+【均价总价】：${prop.totalPrice}
+【预计首付】：${prop.downPayment}
+【当前状态】：${prop.status}
+【户型规格】：${prop.layout}
+
+【核心卖点】：
+${prop.sellingPoints}
+
+【配套设施】：
+${prop.nearbyFacilities || '暂无'}
+
+【项目简介】：
+${prop.projectBrief || '暂无'}
+
+【生成时间】：${new Date(prop.createdAt).toLocaleString()}
+    `.trim();
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${prop.name}_项目简报.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleSaveProfile = () => {
     if (!profileName.trim()) {
       setError('请输入配置名称');
@@ -379,7 +421,7 @@ export default function App() {
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】（如宣传海报、VR 截图、销售笔记等）中提取深度房源信息。必须输出纯 JSON 格式。字段包含：项目名、区域（必须是如“徐汇”、“闵行”等标准行政区）、地址（尽量提取详细门牌号）、总价（如“450万”）、总价数值（用于排序的纯数字）、首付、面积与户型、交房状态、核心卖点（提取最诱人的 2-3 点）、附近配套（交通、学校、商圈）。即使信息零散，也请发挥逻辑推断能力进行整合。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】（如宣传海报、VR 截图、销售笔记等）中提取深度房源信息。必须输出纯 JSON 格式。字段包含：项目名、区域（必须是如“徐汇”、“闵行”等标准行政区）、地址（尽量提取详细门牌号）、总价（如“450万”）、总价数值（用于排序的纯数字）、首付、面积与户型、交房状态、核心卖点（提取最诱人的 2-3 点）、附近配套（交通、学校、商圈）、在售楼层（如“高区”、“12层”）、在售面积（如“89-120平”）、项目资料（如有详细推介文本请汇总）。即使信息零散，也请发挥逻辑推断能力进行整合。' 
             },
             { role: 'user', content: userContent }
           ]
@@ -407,6 +449,9 @@ export default function App() {
         status: ensureString(extracted.交房状态),
         sellingPoints: ensureString(extracted.核心卖点),
         nearbyFacilities: ensureString(extracted.附近配套),
+        saleFloor: ensureString(extracted.在售楼层),
+        saleArea: ensureString(extracted.在售面积),
+        projectBrief: ensureString(extracted.项目资料),
         createdAt: Date.now(),
         userId: auth.currentUser?.uid || 'anonymous'
       };
@@ -430,17 +475,32 @@ export default function App() {
 
     try {
       const modePrompt = matchMode === 'concise' 
-        ? '请输出精简的项目对比方案（1.项目A：卖点；2.项目B：卖点...），字数控制在200字以内，禁止使用Markdown符号。'
+        ? '请输出精简的项目对比方案（1.项目A：卖点；2.项目B：卖点...），字数控制在250字以内，禁止使用Markdown符号。'
         : '请生成一份专业的电销推荐话术，包含开场白、核心优势分析及邀约建议，禁止使用Markdown符号。';
+
+      // Map properties to a slightly more focused object to handle context window better while ensuring key info is included
+      const propertyContext = properties.map(p => ({
+        项目: p.name,
+        区域: p.area,
+        地址: p.address,
+        总价: p.totalPrice,
+        户型: p.layout,
+        在售楼层: p.saleFloor,
+        在售面积: p.saleArea,
+        核心卖点: p.sellingPoints,
+        周边配套: p.nearbyFacilities,
+        项目资料: p.projectBrief // Now including the detailed brief for AI to read
+      }));
 
       const systemPrompt = `你是一个专业的房地产金牌顾问。请根据房源库提供匹配方案。
       要求：
-      1. 一次筛选 2-3 个最符合的项目。
-      2. 严禁使用 **、###、-、* 等 Markdown 符号。
-      3. 结构清爽，使用纯换行组织。
-      4. 当前回复模式：${modePrompt}
+      1. 请仔细分析房源的基本信息，并深度挖掘【项目资料】中的细节（如具体的装修标准、特殊的赠送空间、社区环境、开发商背景等）进行匹配。
+      2. 一次筛选 1-3 个最符合的项目。
+      3. 严禁使用 **、###、-、* 等 Markdown 符号。
+      4. 结构清爽，使用纯换行组织。
+      5. 当前回复模式：${modePrompt}
       
-      房源库：${JSON.stringify(properties)}`;
+      房源库数据（请基于此进行深度推荐）：${JSON.stringify(propertyContext)}`;
 
       const currentMessages: MatchMessage[] = isContinue 
         ? [...matchHistory, { role: 'user', content: matchRequest }]
@@ -1182,6 +1242,9 @@ export default function App() {
                       status: '待定',
                       sellingPoints: '',
                       nearbyFacilities: '',
+                      saleFloor: '',
+                      saleArea: '',
+                      projectBrief: '',
                       imageUrl: '',
                       videoUrl: '',
                       createdAt: Date.now()
@@ -1295,6 +1358,18 @@ export default function App() {
                              {prop.downPayment}
                           </p>
                         </div>
+                        <div className="bg-slate-50 border border-slate-100 p-3 px-5 rounded-2xl flex flex-col justify-center shadow-sm group-hover:bg-theme-bg transition-colors">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">在售楼层</p>
+                          <p className="font-bold text-slate-700 text-xs truncate">
+                             {prop.saleFloor || '待核实'}
+                          </p>
+                        </div>
+                        <div className="bg-slate-50 border border-slate-100 p-3 px-5 rounded-2xl flex flex-col justify-center shadow-sm group-hover:bg-theme-bg transition-colors">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">在售面积</p>
+                          <p className="font-bold text-slate-700 text-xs truncate">
+                             {prop.saleArea || '待核实'}
+                          </p>
+                        </div>
                       </div>
 
                       <div className="space-y-6 flex-grow">
@@ -1340,6 +1415,31 @@ export default function App() {
                                 )}
                               </div>
                             )}
+
+                            {prop.projectBrief && (
+                              <div className="space-y-3 pt-4 border-t border-slate-200/50">
+                                <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest opacity-60">
+                                  <Database className="w-4 h-4 text-purple-400" /> 项目深度资料
+                                </p>
+                                <div className="text-[11px] text-slate-500 font-bold leading-relaxed line-clamp-4 whitespace-pre-wrap italic bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                  {prop.projectBrief}
+                                </div>
+                                <div className="flex items-center gap-4">
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); setEditingProp(prop); }}
+                                    className="text-[9px] font-black text-purple-600 hover:underline flex items-center gap-1"
+                                  >
+                                    <Plus className="w-3 h-3" /> 查看并完善资料
+                                  </button>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); downloadProjectBrief(prop); }}
+                                    className="text-[9px] font-black text-blue-600 hover:underline flex items-center gap-1"
+                                  >
+                                    <Download className="w-3 h-3" /> 下载资产包资料
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1352,10 +1452,10 @@ export default function App() {
                               <Plus className="w-3.5 h-3.5" /> 复核数据
                           </button>
                           <button 
-                              onClick={() => deleteProperty(prop.id)}
-                              className="opacity-0 group-hover:opacity-100 text-[11px] font-black text-rose-300 hover:text-rose-500 flex items-center gap-2 transition-all uppercase tracking-widest"
+                              onClick={() => downloadProjectBrief(prop)}
+                              className="text-[11px] font-black text-blue-400 hover:text-blue-600 flex items-center gap-2 transition-colors uppercase tracking-widest"
                           >
-                              <Trash2 className="w-3.5 h-3.5" /> 移除该项
+                              <Send className="w-3.5 h-3.5" /> 下载资料
                           </button>
                       </div>
                     </motion.div>
@@ -1661,53 +1761,71 @@ export default function App() {
                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
                          />
                        </div>
-                        <div className="col-span-full space-y-3 relative">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">详细地理位置 (关联高德数据)</label>
-                          <div className="relative group/addr">
-                            <input 
-                              value={editingProp.address || ''}
-                              onChange={e => setEditingProp({ ...editingProp, address: e.target.value })}
-                              onFocus={() => editingProp.address && setIsSuggestionOpen(true)}
-                              onBlur={() => setTimeout(() => setIsSuggestionOpen(false), 200)}
-                              placeholder="输入地址或 POI 名称，自动联想补全..."
-                              className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-[2rem] focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/30 outline-none transition-all font-bold text-slate-800 text-lg shadow-sm"
-                            />
-                            <div className="absolute right-6 top-1/2 -translate-y-1/2">
-                               <Search className="w-5 h-5 text-slate-300" />
-                            </div>
-                            
-                            {/* Suggestions Dropdown */}
-                            <AnimatePresence>
-                               {isSuggestionOpen && addressSuggestions.length > 0 && (
-                                 <motion.div 
-                                   initial={{ opacity: 0, y: 10 }}
-                                   animate={{ opacity: 1, y: 0 }}
-                                   exit={{ opacity: 0, y: 10 }}
-                                   className="absolute left-0 right-0 top-full mt-2 bg-white rounded-3xl shadow-2xl border border-slate-100 z-[110] max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide py-2"
-                                 >
-                                   {addressSuggestions.map((tip, idx) => (
-                                     <button
-                                       key={idx}
-                                       type="button"
-                                       onClick={() => {
-                                         setEditingProp({ 
-                                           ...editingProp, 
-                                           address: tip.district + tip.address + tip.name,
-                                           area: tip.district.replace('上海市', '').split('区')[0] + '区'
-                                         });
-                                         setIsSuggestionOpen(false);
-                                       }}
-                                       className="w-full text-left px-6 py-4 hover:bg-slate-50 transition-colors flex flex-col border-b border-slate-50 last:border-0"
-                                     >
-                                       <span className="font-bold text-slate-800 text-sm truncate">{tip.name}</span>
-                                       <span className="text-[10px] text-slate-400 font-medium truncate">{tip.district} {tip.address}</span>
-                                     </button>
-                                   ))}
-                                 </motion.div>
-                               )}
-                            </AnimatePresence>
-                          </div>
-                        </div>
+                       <div className="col-span-full space-y-3">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">详细地理位置 (关联高德数据)</label>
+                         <div className="relative group/addr">
+                           <input 
+                             value={editingProp.address || ''}
+                             onChange={e => setEditingProp({ ...editingProp, address: e.target.value })}
+                             onFocus={() => editingProp.address && setIsSuggestionOpen(true)}
+                             onBlur={() => setTimeout(() => setIsSuggestionOpen(false), 200)}
+                             placeholder="输入地址或 POI 名称，自动联想补全..."
+                             className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-[2rem] focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/30 outline-none transition-all font-bold text-slate-800 text-lg shadow-sm"
+                           />
+                           <div className="absolute right-6 top-1/2 -translate-y-1/2">
+                              <Search className="w-5 h-5 text-slate-300" />
+                           </div>
+                           
+                           {/* Suggestions Dropdown */}
+                           <AnimatePresence>
+                              {isSuggestionOpen && addressSuggestions.length > 0 && (
+                                <motion.div 
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: 10 }}
+                                  className="absolute left-0 right-0 top-full mt-2 bg-white rounded-3xl shadow-2xl border border-slate-100 z-[110] max-h-72 overflow-y-auto overflow-x-hidden scrollbar-hide py-2"
+                                >
+                                  {addressSuggestions.map((tip, idx) => (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingProp({ 
+                                          ...editingProp, 
+                                          address: tip.district + tip.address + tip.name,
+                                          area: tip.district.replace('上海市', '').split('区')[0] + '区'
+                                        });
+                                        setIsSuggestionOpen(false);
+                                      }}
+                                      className="w-full text-left px-6 py-4 hover:bg-slate-50 transition-colors flex flex-col border-b border-slate-50 last:border-0"
+                                    >
+                                      <span className="font-bold text-slate-800 text-sm truncate">{tip.name}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium truncate">{tip.district} {tip.address}</span>
+                                    </button>
+                                  ))}
+                                </motion.div>
+                              )}
+                           </AnimatePresence>
+                         </div>
+                       </div>
+                       <div className="grid grid-cols-2 gap-4 col-span-full">
+                         <div className="space-y-3">
+                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">在售楼层 (如: 12-25层)</label>
+                           <input 
+                             value={editingProp.saleFloor || ''}
+                             onChange={e => setEditingProp({ ...editingProp, saleFloor: e.target.value })}
+                             className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
+                           />
+                         </div>
+                         <div className="space-y-3">
+                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">在售面积 (如: 89-130平)</label>
+                           <input 
+                             value={editingProp.saleArea || ''}
+                             onChange={e => setEditingProp({ ...editingProp, saleArea: e.target.value })}
+                             className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
+                           />
+                         </div>
+                       </div>
                        <div className="space-y-3">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">价格/区间描述</label>
                          <input 
@@ -1768,6 +1886,15 @@ export default function App() {
                            value={editingProp.sellingPoints}
                            onChange={e => setEditingProp({ ...editingProp, sellingPoints: e.target.value })}
                            className="w-full h-32 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed"
+                         />
+                       </div>
+                       <div className="col-span-full space-y-3">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">项目深度推介资料 (可将复制出的长文、图片列表粘贴于此)</label>
+                         <textarea 
+                           value={editingProp.projectBrief || ''}
+                           onChange={e => setEditingProp({ ...editingProp, projectBrief: e.target.value })}
+                           placeholder="项目详细介绍、楼盘参数、图片汇总描述等..."
+                           className="w-full h-48 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed"
                          />
                        </div>
                        <div className="col-span-full space-y-3">
