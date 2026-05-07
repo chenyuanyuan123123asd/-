@@ -396,10 +396,24 @@ ${prop.projectBrief || '暂无'}
   };
 
   const cleanJson = (text: string) => {
-    return text
-      .replace(/```json/gi, '')
-      .replace(/```/gi, '')
-      .trim();
+    try {
+      // 1. Try to find standard JSON blocks first
+      const jsonBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (jsonBlockMatch && jsonBlockMatch[1]) {
+        return jsonBlockMatch[1].trim();
+      }
+
+      // 2. Fallback: Find the first '{' and the last '}'
+      const firstBrace = text.indexOf('{');
+      const lastBrace = text.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        return text.substring(firstBrace, lastBrace + 1).trim();
+      }
+
+      return text.trim();
+    } catch (e) {
+      return text.trim();
+    }
   };
 
   const ensureString = (val: any): string => {
@@ -444,10 +458,12 @@ ${prop.projectBrief || '暂无'}
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】（如宣传海报、VR 截图、销售笔记等）中提取深度房源信息。必须输出纯 JSON 格式。字段包含：项目名、区域（必须是如“徐汇”、“闵行”等标准行政区）、地址（尽量提取详细门牌号）、总价（如“450万”）、总价数值（用于排序的纯数字）、首付、面积与户型、交房状态、核心卖点（提取最诱人的 2-3 点）、附近配套（交通、学校、商圈）、在售楼层（如“高区”、“12层”）、在售面积（如“89-120平”）、项目资料（如有详细推介文本请汇总）。即使信息零散，也请发挥逻辑推断能力进行整合。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】（如宣传海报、VR 截图、销售笔记等）中提取深度房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式，且不包含任何 Markdown 格式符号。字段包含：项目名、区域（必须是如“徐汇”、“闵行”等标准行政区）、地址（尽量提取详细门牌号）、总价（如“450万”）、总价数值（用于排序的纯数字）、首付、面积与户型、交房状态、核心卖点（提取最诱人的 2-3 点）、附近配套（交通、学校、商圈）、在售楼层（如“高区”、“12层”）、在售面积（如“89-120平”）、项目资料（如有详细推介文本请汇总）。即使信息零散，也请发挥逻辑推断能力进行整合。' 
             },
             { role: 'user', content: userContent }
-          ]
+          ],
+          // Use json_object format for supported models
+          ...( (config.model.includes('gpt-4') || config.model.includes('gemini') || config.model.includes('deepseek')) ? { response_format: { type: 'json_object' } } : {} )
         })
       });
 
