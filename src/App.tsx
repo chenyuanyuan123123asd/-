@@ -329,6 +329,18 @@ ${prop.projectBrief || '暂无'}
     URL.revokeObjectURL(url);
   };
 
+  const handleDeleteProp = (id: string) => {
+    if (window.confirm('确定要删除该房源吗？此操作不可撤销。')) {
+      setProperties(prev => prev.filter(p => p.id !== id));
+      if (selectedPropIds.includes(id)) {
+        setSelectedPropIds(prev => prev.filter(sid => sid !== id));
+      }
+      if (editingProp?.id === id) {
+        setEditingProp(null);
+      }
+    }
+  };
+
   const handleSaveProfile = () => {
     if (!profileName.trim()) {
       setError('请输入配置名称');
@@ -1316,8 +1328,17 @@ ${prop.projectBrief || '暂无'}
                       </div>
 
                       {/* Status pill */}
-                      <div className="absolute top-6 right-6 z-10">
-                         <div className={`px-3 py-1.5 rounded-full text-[9px] font-black tracking-widest text-white flex items-center gap-2 uppercase ${getStatusColor(prop.status)}`}>
+                      <div className="absolute top-6 right-6 z-10 flex items-center gap-2">
+                         <button 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             handleDeleteProp(prop.id);
+                           }}
+                           className="w-8 h-8 rounded-full bg-white/80 backdrop-blur-md border border-red-100 text-red-400 hover:bg-red-500 hover:text-white transition-all flex items-center justify-center shadow-lg"
+                         >
+                           <Trash2 className="w-4 h-4" />
+                         </button>
+                         <div className={`px-3 py-1.5 rounded-full text-[9px] font-black tracking-widest text-white flex items-center gap-2 uppercase shadow-lg ${getStatusColor(prop.status)}`}>
                            <div className="w-1 h-1 bg-white rounded-full animate-pulse" />
                            {prop.status}
                          </div>
@@ -1841,6 +1862,13 @@ ${prop.projectBrief || '暂无'}
                       className="px-10 py-5 bg-slate-50 text-slate-400 rounded-[2rem] font-black text-lg hover:bg-slate-100 transition-all border border-slate-100"
                     >
                       舍弃更改
+                    </button>
+                    <button 
+                      onClick={() => editingProp && handleDeleteProp(editingProp.id)}
+                      className="p-5 border-2 border-red-50 text-red-100 hover:text-red-500 hover:bg-red-50 rounded-[2rem] transition-all"
+                      title="删除房源"
+                    >
+                      <Trash2 className="w-5 h-5" />
                     </button>
                  </div>
               </motion.div>
