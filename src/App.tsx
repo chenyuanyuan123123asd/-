@@ -21,6 +21,8 @@ import {
   Camera,
   Download,
   Menu,
+  Check,
+  MapPin,
   X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -540,7 +542,7 @@ ${prop.projectBrief || '暂无'}
   };
 
   const handleExtractImage = (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+    const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
     
     if (extractImages.length + files.length > 18) {
@@ -548,7 +550,7 @@ ${prop.projectBrief || '暂无'}
       return;
     }
 
-    const readers = files.map(file => {
+    const readers = files.map((file: File) => {
       return new Promise<string>((resolve, reject) => {
         if (file.size > 4 * 1024 * 1024) {
           reject(new Error(`${file.name} 超过 4MB`));
@@ -571,7 +573,7 @@ ${prop.projectBrief || '暂无'}
   };
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>, field: 'imageUrl' | 'videoUrl') => {
-    const file = e.target.files?.[0];
+    const file = e.target.files?.[0] as File;
     if (!file || !editingProp) return;
     
     if (file.size > 2 * 1024 * 1024) {
@@ -1293,172 +1295,91 @@ ${prop.projectBrief || '暂无'}
                     <motion.div 
                       layout
                       key={prop.id}
-                      onClick={(e) => {
-                         if (e.shiftKey) togglePropSelection(prop.id);
-                      }}
-                      className={`group bg-white rounded-[3rem] border-2 transition-all p-8 relative overflow-hidden flex flex-col cursor-pointer ${selectedPropIds.includes(prop.id) ? `border-slate-800 ring-4 ring-slate-100` : 'border-white shadow-2xl shadow-slate-200/60 hover:shadow-slate-300'}`}
+                      onClick={() => setEditingProp(prop)}
+                      className={`group bg-white rounded-[2.5rem] border-2 transition-all p-6 relative overflow-hidden flex flex-col cursor-pointer hover:shadow-2xl hover:border-theme-primary/20 transition-all duration-300 ${selectedPropIds.includes(prop.id) ? `border-slate-800 ring-4 ring-slate-100 shadow-2xl` : 'border-white shadow-xl shadow-slate-200/40'}`}
                     >
                       {/* Selection Badge */}
-                      {selectedPropIds.includes(prop.id) && (
-                        <div className="absolute top-8 left-8 z-20">
-                          <div className="bg-slate-900 text-white p-2 rounded-full shadow-xl">
-                            <CheckCircle2 className="w-5 h-5" />
-                          </div>
-                        </div>
-                      )}
+                      <div className="absolute top-6 left-6 z-20">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePropSelection(prop.id);
+                          }}
+                          className={`w-7 h-7 rounded-full border-2 transition-all flex items-center justify-center ${
+                            selectedPropIds.includes(prop.id) 
+                            ? 'bg-slate-900 border-slate-900 text-white' 
+                            : 'bg-white/80 backdrop-blur-md border-slate-200 hover:border-theme-primary'
+                          }`}
+                        >
+                          {selectedPropIds.includes(prop.id) ? <Check className="w-4 h-4" /> : <div className="w-2 h-2 rounded-full bg-slate-200" />}
+                        </button>
+                      </div>
 
-                      {/* Status indicator pill */}
-                      <div className="absolute top-8 right-8 z-10">
-                         <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest text-white shadow-xl flex items-center gap-2 uppercase ${getStatusColor(prop.status)}`}>
-                           <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />
+                      {/* Status pill */}
+                      <div className="absolute top-6 right-6 z-10">
+                         <div className={`px-3 py-1.5 rounded-full text-[9px] font-black tracking-widest text-white flex items-center gap-2 uppercase ${getStatusColor(prop.status)}`}>
+                           <div className="w-1 h-1 bg-white rounded-full animate-pulse" />
                            {prop.status}
                          </div>
                       </div>
 
-                      {prop.imageUrl ? (
-                         <div className="h-56 -mx-8 -mt-8 mb-8 overflow-hidden relative">
-                            <img src={prop.imageUrl} alt={prop.name} className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-1000" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent opacity-60" />
-                            {prop.videoUrl && (
-                               <div className="absolute bottom-4 right-4 bg-white/80 backdrop-blur-md p-2 rounded-full shadow-lg">
-                                 <Plus className="w-4 h-4 text-theme-primary animate-pulse" />
-                               </div>
-                            )}
-                         </div>
-                      ) : (
-                        <div className={`h-2 -mx-8 -mt-8 mb-8 ${getStatusColor(prop.status)}/30`} />
-                      )}
-                      
-                      <div className="space-y-1.5 mb-8">
-                         <div className="flex items-center justify-between gap-2">
-                           <h3 
-                              className="font-black text-2xl text-slate-900 group-hover:text-theme-primary transition-colors cursor-pointer font-serif line-clamp-1" 
-                              onClick={() => setEditingProp(prop)}
-                           >
-                              {prop.name}
+                      <div className="space-y-4 pt-10">
+                         <div className="space-y-1">
+                           <h3 className="font-black text-xl text-slate-800 group-hover:text-theme-primary transition-colors truncate">
+                             {prop.name}
                            </h3>
-                           {prop.videoUrl && <Plus className="w-4 h-4 text-rose-300" />}
+                           <div className="flex items-center gap-1.5">
+                             <MapPin className="w-3 h-3 text-slate-400" />
+                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate">{prop.area} · {prop.address?.split('区')?.[1]?.slice(0, 10) || '点击看详情'}</p>
+                           </div>
                          </div>
-                         <div className="flex items-center gap-2">
-                            <Plus className={`w-3 h-3 ${t.primary}`} />
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">{prop.area}</p>
+
+                         {/* Mini Data Grid */}
+                         <div className="grid grid-cols-2 gap-2">
+                           <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                             <p className="text-[8px] font-black text-slate-300 uppercase leading-none mb-1">价格/区间</p>
+                             <p className="font-black text-theme-primary text-lg leading-none font-mono tracking-tighter">{prop.totalPrice}</p>
+                           </div>
+                           <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                             <p className="text-[8px] font-black text-slate-300 uppercase leading-none mb-1">在售面积</p>
+                             <p className="font-black text-slate-700 text-sm leading-none truncate">{prop.saleArea || '待核实'}</p>
+                           </div>
+                           <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                             <p className="text-[8px] font-black text-slate-400 uppercase leading-none mb-1">楼层</p>
+                             <p className="font-bold text-slate-600 text-[10px] truncate">{prop.saleFloor || '-'}</p>
+                           </div>
+                           <div className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                             <p className="text-[8px] font-black text-slate-400 uppercase leading-none mb-1">户型规格</p>
+                             <p className="font-bold text-slate-600 text-[10px] truncate">{prop.layout}</p>
+                           </div>
                          </div>
-                      </div>
 
-                      <div className="grid grid-cols-2 gap-4 mb-8">
-                        <div className="bg-slate-50 border border-slate-100 p-5 rounded-3xl flex flex-col justify-center shadow-inner group-hover:bg-white transition-colors">
-                          <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.1em] mb-1.5">均价/总价</p>
-                          <p className="font-black text-slate-900 text-xl leading-none font-mono tracking-tighter">
-                             {prop.totalPrice}
-                          </p>
-                        </div>
-                        <div className="bg-slate-50 border border-slate-100 p-5 rounded-3xl flex flex-col justify-center shadow-inner group-hover:bg-white transition-colors">
-                          <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.1em] mb-1.5">预计首付</p>
-                          <p className="font-black text-slate-900 text-xl leading-none font-mono tracking-tighter">
-                             {prop.downPayment}
-                          </p>
-                        </div>
-                        <div className="bg-slate-50 border border-slate-100 p-3 px-5 rounded-2xl flex flex-col justify-center shadow-sm group-hover:bg-theme-bg transition-colors">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">在售楼层</p>
-                          <p className="font-bold text-slate-700 text-xs truncate">
-                             {prop.saleFloor || '待核实'}
-                          </p>
-                        </div>
-                        <div className="bg-slate-50 border border-slate-100 p-3 px-5 rounded-2xl flex flex-col justify-center shadow-sm group-hover:bg-theme-bg transition-colors">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-[0.1em] mb-1">在售面积</p>
-                          <p className="font-bold text-slate-700 text-xs truncate">
-                             {prop.saleArea || '待核实'}
-                          </p>
-                        </div>
-                      </div>
+                         {/* Selling Points Tag Cloud */}
+                         <div className="flex flex-wrap gap-1.5 h-10 overflow-hidden">
+                           {ensureString(prop.sellingPoints).split(/[,，、]/).slice(0, 3).map((tag, i) => (
+                             <span key={i} className="text-[9px] px-2 py-1 bg-slate-100 text-slate-500 rounded-lg font-black border border-slate-200/30">
+                               {tag.trim()}
+                             </span>
+                           ))}
+                         </div>
 
-                      <div className="space-y-6 flex-grow">
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-2xl ${t.secondary} text-white flex items-center justify-center shadow-xl group-hover:rotate-6 transition-transform`}>
-                            <Database className="w-5 h-5" />
-                          </div>
-                          <div className="flex flex-col">
-                             <span className="text-[9px] font-black text-slate-300 uppercase leading-none mb-1 tracking-widest">户型规格</span>
-                             <span className="font-black text-slate-800 text-md leading-none">{prop.layout}</span>
-                          </div>
-                        </div>
-
-                        <div className="bg-slate-50/80 border border-white p-6 rounded-[2rem] shadow-sm group-hover:bg-white/80 transition-all">
-                          <div className="space-y-4">
-                            <div className="space-y-2">
-                              <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest opacity-60">
-                                <Sparkles className="w-4 h-4 text-emerald-400" /> 特权卖点
-                              </p>
-                              <p className="text-sm text-slate-600 leading-relaxed italic font-medium">
-                                "{ensureString(prop.sellingPoints)}"
-                              </p>
+                         {/* Action Indicators */}
+                         <div className="flex items-center justify-between pt-2 border-t border-slate-50">
+                            <div className="flex items-center gap-2">
+                              {prop.projectBrief && <Database className="w-3.5 h-3.5 text-purple-400" />}
+                              {prop.imageUrl && <Camera className="w-3.5 h-3.5 text-slate-300" />}
                             </div>
-
-                            {(prop.nearbyFacilities || prop.address) && (
-                              <div className="space-y-2 pt-4 border-t border-slate-200/50">
-                                <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest opacity-60">
-                                  <Search className="w-4 h-4 text-sky-400" /> 配套引擎
-                                </p>
-                                {prop.nearbyFacilities ? (
-                                  <p className="text-[11px] text-slate-500 font-bold leading-relaxed line-clamp-3">
-                                    {ensureString(prop.nearbyFacilities)}
-                                  </p>
-                                ) : (
-                                   <button 
-                                     onClick={(e) => { e.stopPropagation(); suggestAmenities(prop); }}
-                                     disabled={isSuggesting === prop.id}
-                                     className="w-full py-3 bg-white border border-slate-100 rounded-2xl text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95"
-                                   >
-                                     {isSuggesting === prop.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                                     匹配周边配套
-                                   </button>
-                                )}
-                              </div>
-                            )}
-
-                            {prop.projectBrief && (
-                              <div className="space-y-3 pt-4 border-t border-slate-200/50">
-                                <p className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-2 tracking-widest opacity-60">
-                                  <Database className="w-4 h-4 text-purple-400" /> 项目深度资料
-                                </p>
-                                <div className="text-[11px] text-slate-500 font-bold leading-relaxed line-clamp-4 whitespace-pre-wrap italic bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                                  {prop.projectBrief}
-                                </div>
-                                <div className="flex items-center gap-4">
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); setEditingProp(prop); }}
-                                    className="text-[9px] font-black text-purple-600 hover:underline flex items-center gap-1"
-                                  >
-                                    <Plus className="w-3 h-3" /> 查看并完善资料
-                                  </button>
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); downloadProjectBrief(prop); }}
-                                    className="text-[9px] font-black text-blue-600 hover:underline flex items-center gap-1"
-                                  >
-                                    <Download className="w-3 h-3" /> 下载资产包资料
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-10 flex items-center justify-between border-t border-slate-50 pt-5">
-                          <button 
-                              onClick={() => setEditingProp(prop)}
-                              className="text-[11px] font-black text-slate-400 hover:text-slate-800 flex items-center gap-2 transition-colors uppercase tracking-widest"
-                          >
-                              <Plus className="w-3.5 h-3.5" /> 复核数据
-                          </button>
-                          <button 
-                              onClick={() => downloadProjectBrief(prop)}
-                              className="text-[11px] font-black text-blue-400 hover:text-blue-600 flex items-center gap-2 transition-colors uppercase tracking-widest"
-                          >
-                              <Send className="w-3.5 h-3.5" /> 下载资料
-                          </button>
+                            <button 
+                             onClick={(e) => { e.stopPropagation(); downloadProjectBrief(prop); }}
+                             className="text-[10px] font-black text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-colors uppercase tracking-widest group/dl"
+                           >
+                             <Download className="w-3.5 h-3.5 group-hover/dl:-translate-y-0.5 transition-transform" />
+                             资料
+                           </button>
+                         </div>
                       </div>
                     </motion.div>
+
                   ))}
                 </div>
               )}
