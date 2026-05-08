@@ -15,16 +15,14 @@ service cloud.firestore {
 
     // Validation Helpers
     function isValidProperty(data) {
-      return data.keys().hasAll(['name', 'userId', 'createdAt']) &&
-             data.name is string && data.name.size() <= 200 &&
-             data.userId == request.auth.uid;
+      return data.userId == request.auth.uid &&
+             data.name is string && data.name.size() <= 1000;
     }
 
     function isValidTemplate(data) {
-      return data.keys().hasAll(['name', 'content', 'userId']) &&
-             data.name is string && data.name.size() <= 100 &&
-             data.content is string && data.content.size() <= 2000 &&
-             data.userId == request.auth.uid;
+      return data.userId == request.auth.uid &&
+             data.name is string && data.name.size() <= 500 &&
+             data.content is string && data.content.size() <= 10000;
     }
 
     // Collections

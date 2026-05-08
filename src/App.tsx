@@ -46,6 +46,7 @@ import {
   doc, 
   onSnapshot, 
   query, 
+  where,
   orderBy,
   setDoc,
   serverTimestamp
@@ -337,15 +338,18 @@ export default function App() {
         // Sync User specific properties
         const qProps = query(
           collection(db, 'properties'), 
-          where('userId', '==', u.uid),
-          orderBy('createdAt', 'desc')
+          where('userId', '==', u.uid)
         );
         const unsubProps = onSnapshot(qProps, (snapshot) => {
-          const props: Property[] = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          } as Property));
-          setProperties(props);
+          const props: Property[] = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ...data,
+              createdAt: data.createdAt?.toMillis?.() || data.createdAt || 0
+            } as Property;
+          });
+          setProperties(props.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
         }, (err) => {
           handleFirestoreError(err, OperationType.LIST, 'properties');
           setError(`房源同步失败: ${err.message}`);
@@ -354,14 +358,17 @@ export default function App() {
         // Sync Broadcast Templates
         const qBroad = query(
           collection(db, 'broadcastTemplates'), 
-          where('userId', '==', u.uid),
-          orderBy('createdAt', 'desc')
+          where('userId', '==', u.uid)
         );
         const unsubBroad = onSnapshot(qBroad, (snapshot) => {
-          const broadList = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as BroadcastTemplate[];
+          const broadList = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ...data,
+              createdAt: data.createdAt?.toMillis?.() || data.createdAt || 0
+            };
+          }).sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0)) as BroadcastTemplate[];
           setBroadcastTemplates(broadList);
         }, (err) => {
           handleFirestoreError(err, OperationType.LIST, 'broadcastTemplates');
@@ -761,7 +768,7 @@ export default function App() {
         projectBrief: ensureString(extracted.项目资料),
         projectImages: [],
         briefBlocks: extracted.项目资料 ? [{ id: Math.random().toString(36).substr(2, 9), type: 'text', content: ensureString(extracted.项目资料) }] : [],
-        createdAt: Date.now(),
+        createdAt: serverTimestamp(),
         userId: auth.currentUser?.uid
       };
 
