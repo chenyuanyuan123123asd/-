@@ -90,7 +90,6 @@ interface Property {
   address?: string;
   totalPrice: string;
   averagePrice?: string; // 均价
-  priceDisplay?: string; // 处理后的显示价格
   totalPriceValue?: number; // Normalized price for sorting/matching
   layout: string;
   sellingPoints: string;
@@ -597,7 +596,7 @@ export default function App() {
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。项目名必须使用中文，严禁输出任何英文名称。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、交通情况、核心卖点、附近配套、在售楼层、在售面积。关于交通情况：请务必详细提取离每个地铁站的距离，只要地铁站，地铁不方便的加公交站，如果资料里没有写地铁站，你必须根据项目地址自动确认距离。最后，将所有其他零散的卖点或补充说明总结到“项目资料”字段中。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。项目名必须【仅限中文】，绝对禁止包含任何英文单词、全称、缩写或英文字母（如：ANDI HOUSE 应提取为 安邸）。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、交通情况、核心卖点、附近配套、在售楼层、在售面积。关于交通情况：请务必详细提取离每个地铁站的距离，只要地铁站，地铁不方便的加公交站，如果资料里没有写地铁站，你必须根据项目地址自动确认距离。最后，将所有其他零散的卖点或补充说明总结到“项目资料”字段中。' 
             },
             { role: 'user', content: userContent }
           ],
@@ -625,7 +624,6 @@ export default function App() {
         address: ensureString(extracted.地址),
         totalPrice: totalP,
         averagePrice: avgP,
-        priceDisplay: totalP && totalP !== '暂无' ? totalP : (avgP && avgP !== '暂无' ? avgP : '暂无'),
         totalPriceValue: extracted.总价数值,
         layout: ensureString(extracted.面积与户型),
         utilities: ensureString(extracted.水电煤),
@@ -1750,7 +1748,7 @@ export default function App() {
                          <div className="space-y-1.5 mb-1">
                            <div className="bg-slate-50/50 p-2 rounded-xl border border-slate-100 group-hover:bg-white transition-colors">
                              <p className="font-black text-theme-primary text-base leading-none font-mono tracking-tighter truncate">
-                               {prop.priceDisplay || prop.totalPrice}
+                               {prop.totalPrice || '暂无'}
                              </p>
                            </div>
                            
