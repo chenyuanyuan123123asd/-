@@ -27,25 +27,19 @@ service cloud.firestore {
 
     // Collections
     match /properties/{propertyId} {
-      allow get: if isSignedIn() && isOwner(existing().userId);
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(propertyId) && isValidProperty(incoming());
-      allow update: if isSignedIn() && isOwner(existing().userId) && isValidProperty(incoming()) && (
-        incoming().userId == existing().userId &&
-        incoming().id == existing().id
-      );
-      allow delete: if isSignedIn() && isOwner(existing().userId);
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || !('userId' in resource.data));
+      allow create: if isSignedIn() && isValidProperty(request.resource.data);
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || !('userId' in resource.data)) && isValidProperty(request.resource.data);
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || !('userId' in resource.data));
     }
 
     match /broadcastTemplates/{templateId} {
-      allow get: if isSignedIn() && isOwner(existing().userId);
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(templateId) && isValidTemplate(incoming());
-      allow update: if isSignedIn() && isOwner(existing().userId) && isValidTemplate(incoming()) && (
-        incoming().userId == existing().userId &&
-        incoming().id == existing().id
-      );
-      allow delete: if isSignedIn() && isOwner(existing().userId);
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || !('userId' in resource.data));
+      allow create: if isSignedIn() && isValidTemplate(request.resource.data);
+      allow update: if isSignedIn() && (resource.data.userId == request.auth.uid || !('userId' in resource.data)) && isValidTemplate(request.resource.data);
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || !('userId' in resource.data));
     }
   }
 }

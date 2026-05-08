@@ -109,6 +109,7 @@ interface Property {
   videoUrl?: string; // 房源视频
   briefBlocks?: BriefBlock[]; // 新版：图文视频穿插资料
   createdAt: number;
+  userId?: string;
 }
 
 interface MatchMessage {
@@ -153,6 +154,7 @@ interface BroadcastTemplate {
   name: string;
   content: string;
   createdAt: any;
+  userId?: string;
 }
 
 const THEMES: Record<ThemeMode, ThemeConfig> = {
@@ -273,7 +275,7 @@ export default function App() {
   const [onCropDone, setOnCropDone] = useState<(dataUrl: string) => void>(() => () => {});
   const [broadcastResult, setBroadcastResult] = useState('');
   const [broadcastTemplates, setBroadcastTemplates] = useState<BroadcastTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [broadcastTemplate, setBroadcastTemplate] = useState('');
@@ -290,13 +292,22 @@ export default function App() {
     }
     setIsSavingTemplate(true);
     try {
-      await addDoc(collection(db, 'broadcastTemplates'), {
-        name: newTemplateName,
-        content: broadcastTemplate,
-        userId: auth.currentUser?.uid,
-        createdAt: serverTimestamp()
-      });
-      setNewTemplateName('');
+      if (selectedTemplateIds.length === 1) {
+        const id = selectedTemplateIds[0];
+        await updateDoc(doc(db, 'broadcastTemplates', id), {
+          name: newTemplateName,
+          content: broadcastTemplate,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await addDoc(collection(db, 'broadcastTemplates'), {
+          name: newTemplateName,
+          content: broadcastTemplate,
+          userId: auth.currentUser?.uid,
+          createdAt: serverTimestamp()
+        });
+        setNewTemplateName('');
+      }
       setError(null);
     } catch (err: any) {
       const error = handleFirestoreError(err, OperationType.WRITE, 'broadcastTemplates');
@@ -310,9 +321,11 @@ export default function App() {
     e.stopPropagation();
     try {
       await deleteDoc(doc(db, 'broadcastTemplates', id));
-      if (selectedTemplateId === id) {
-        setSelectedTemplateId(null);
-        setBroadcastTemplate('');
+      if (selectedTemplateIds.includes(id)) {
+        setSelectedTemplateIds(prev => prev.filter(i => i !== id));
+        if (selectedTemplateIds.length === 1) {
+          setBroadcastTemplate('');
+        }
       }
     } catch (err: any) {
       handleFirestoreError(err, OperationType.DELETE, `broadcastTemplates/${id}`);
@@ -336,19 +349,18 @@ export default function App() {
       setUser(u);
       if (u) {
         // Sync User specific properties
-        const qProps = query(
-          collection(db, 'properties'), 
-          where('userId', '==', u.uid)
-        );
+        const qProps = query(collection(db, 'properties'));
         const unsubProps = onSnapshot(qProps, (snapshot) => {
-          const props: Property[] = snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              ...data,
-              createdAt: data.createdAt?.toMillis?.() || data.createdAt || 0
-            } as Property;
-          });
+          const props: Property[] = snapshot.docs
+            .map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                ...data,
+                createdAt: data.createdAt?.toMillis?.() || data.createdAt || 0
+              } as Property;
+            })
+            .filter(p => !p.userId || p.userId === u.uid);
           setProperties(props.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
         }, (err) => {
           handleFirestoreError(err, OperationType.LIST, 'properties');
@@ -356,19 +368,19 @@ export default function App() {
         });
 
         // Sync Broadcast Templates
-        const qBroad = query(
-          collection(db, 'broadcastTemplates'), 
-          where('userId', '==', u.uid)
-        );
+        const qBroad = query(collection(db, 'broadcastTemplates'));
         const unsubBroad = onSnapshot(qBroad, (snapshot) => {
-          const broadList = snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              ...data,
-              createdAt: data.createdAt?.toMillis?.() || data.createdAt || 0
-            };
-          }).sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0)) as BroadcastTemplate[];
+          const broadList = snapshot.docs
+            .map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                ...data,
+                createdAt: data.createdAt?.toMillis?.() || data.createdAt || 0
+              };
+            })
+            .filter((p: any) => !p.userId || p.userId === u.uid)
+            .sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0)) as BroadcastTemplate[];
           setBroadcastTemplates(broadList);
         }, (err) => {
           handleFirestoreError(err, OperationType.LIST, 'broadcastTemplates');
@@ -748,7 +760,7 @@ export default function App() {
       const avgP = ensureString(extracted.均价);
       
       const propData = {
-        name: ensureString(extracted.项目名),
+        name: ensureString(extracted.项目名) || '未命名房源',
         area: ensureString(extracted.区域),
         address: ensureString(extracted.地址),
         totalPrice: totalP,
@@ -1118,26 +1130,24 @@ export default function App() {
       
       let systemPrompt = '';
       if (broadcastTemplate.trim()) {
-        systemPrompt = `你是一个房地产文案专家。请严格按照用户提供的【自定义内容/模板】进行生成或格式化。
+        systemPrompt = `你是一个房地产文案专家。请直接基于用户提供的【文案基础/模板】进行生成。
         
-        文案基础/模板：
-        ${broadcastTemplate}
-        
-        要求：
-        1. 如果是模板，将占位符（如 {项目名}, {总价}, {区域}, {单价}, {卖点} 等）替换为实际房源信息。
-        2. 如果是参考文案，请参考其风格并带入房源信息。
-        3. 区域名去掉“区”或“新区”后缀（如：浦东新区 -> 浦东）。
-        4. 严禁使用任何 Markdown 符号（如 ** 或 #），保持纯文字+Emoji格式。`;
+        【核心指令】：
+        1. 【字数/风格对齐】：必须保持与模板相近的字数和语气。长模版则详尽，短模版则精炼。严禁将短模板扩充为长篇大论。
+        2. 【无痕事实核查】：如果房源数据与模板/常识冲突（如不通燃气、非住宅水电等），请将这些信息【自然融入】文案中，不要以“温馨提示”等说教口吻列出。
+           - 示例：如果是公寓且不通燃气，文案应写为“都会精致空间，虽无明火燃气，但享极速商用配套”等，而非生硬提醒。
+        3. 【变量替换】：占位符（如 {项目名}, {总价} 等）必须替换。区域名去掉“区”或“新区”后缀。
+        4. 【格式限制】：保持纯文字+Emoji，严禁使用任何 Markdown 符号（如 ** 或 #）。`;
       } else {
         systemPrompt = `你是一个上海顶级房地产金牌顾问。请为选中的房源生成一段极具吸引力、非同质化的群发文案。
         
-        核心准则：
-        1. 【绝对去同质化】：拒绝公式化开场词，每次生成的文案结构都要有所变化。
-        2. 【情感联结】：重点突出房源的“稀缺性”或“生活品质”，而不仅仅是罗列数据。
-        3. 【呼吸感排版】：大量使用 Emoji [🔥][🏠][💰][🌈][🚀][✨][💎][📍][👑][💯]，保持文案紧凑有质感。
-        4. 区域名简短化：必须去掉“区”或“新区”后缀。
-        5. 严禁任何 Markdown 格式（如 ** 或 #），保持移动端易读性。
-        6. 针对不同房源采用不同口吻（如：有的走专业分析，有的走紧急捡漏，有的走温馨居家）。`;
+        【核心准则】：
+        1. 【事实第一】：严禁编造房源信息。必须仔细检查房源的燃气、水电、梯户比等技术指标。
+        2. 【绝对去同质化】：拒绝公式化开场词，每次生成的文案结构都要有所变化。
+        3. 【情感联结】：重点突出房源的“稀缺性”或“生活品质”，而不仅仅是罗列数据。
+        4. 【呼吸感排版】：大量使用 Emoji，保持文案紧凑有质感。
+        5. 区域名简短化：必须去掉“区”或“新区”后缀。
+        6. 严禁任何 Markdown 格式，保持移动端易读性。`;
       }
 
       const response = await fetch(config.url, {
@@ -1155,12 +1165,16 @@ export default function App() {
             },
             {
               role: 'user',
-              content: `房源数据：${JSON.stringify(selectedProps.map(p => ({
+              content: `【参考模板/风格内容】：\n${broadcastTemplate}\n\n【房源真实数据】：\n${JSON.stringify(selectedProps.map(p => ({
                 名称: p.name,
                 区域: p.area,
                 总价: p.totalPrice,
                 单价: p.unitPrice,
-                卖点: p.features
+                楼层: p.saleFloor,
+                面积: p.saleArea,
+                燃气: p.hasGas === true ? '通燃气' : (p.hasGas === false ? '不通燃气' : '未标明'),
+                水电: p.utilities,
+                卖点: p.sellingPoints || p.features
               })))}`
             }
           ]
@@ -1195,6 +1209,7 @@ export default function App() {
   const updateProperty = async (updated: Property) => {
     try {
       const { id, ...data } = updated;
+      (data as any).userId = auth.currentUser?.uid;
       await updateDoc(doc(db, 'properties', id), data as any);
       setEditingProp(null);
     } catch (err: any) {
@@ -2103,7 +2118,7 @@ export default function App() {
                         </label>
                         <button 
                           onClick={() => {
-                            setSelectedTemplateId(null);
+                            setSelectedTemplateIds([]);
                             setBroadcastTemplate('');
                             setNewTemplateName('');
                           }}
@@ -2119,21 +2134,47 @@ export default function App() {
                             <div 
                               key={tpl.id}
                               onClick={() => {
-                                setSelectedTemplateId(tpl.id);
-                                setBroadcastTemplate(tpl.content);
-                                setNewTemplateName(tpl.name);
+                                setSelectedTemplateIds(prev => {
+                                  const isSelected = prev.includes(tpl.id);
+                                  const next = isSelected 
+                                    ? prev.filter(id => id !== tpl.id) 
+                                    : [...prev, tpl.id];
+                                  
+                                  // 自动拼接选中模板的内容
+                                  const combinedContent = broadcastTemplates
+                                    .filter(t => next.includes(t.id))
+                                    .map(t => t.content)
+                                    .join('\n\n---\n\n');
+                                  
+                                  setBroadcastTemplate(combinedContent);
+                                  
+                                  // 如果只剩下一个，进入重命名/编辑模式
+                                  if (next.length === 1) {
+                                    const single = broadcastTemplates.find(t => t.id === next[0]);
+                                    if (single) setNewTemplateName(single.name);
+                                  } else {
+                                    setNewTemplateName('');
+                                  }
+                                  
+                                  return next;
+                                });
                               }}
                               className={`p-4 rounded-[1.5rem] border-2 transition-all cursor-pointer relative group ${
-                                selectedTemplateId === tpl.id 
+                                selectedTemplateIds.includes(tpl.id) 
                                   ? 'border-slate-900 bg-slate-900 text-white shadow-xl' 
                                   : 'border-slate-100 bg-white text-slate-600 hover:border-slate-200 shadow-sm'
                               }`}
                             >
                               <div className="font-black text-xs mb-1 truncate">{tpl.name}</div>
                               <div className="text-[10px] opacity-40 truncate leading-tight h-4">{tpl.content}</div>
+                              {selectedTemplateIds.includes(tpl.id) && (
+                                <div className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center text-[10px] font-black border-2 border-white shadow-lg">
+                                  {selectedTemplateIds.indexOf(tpl.id) + 1}
+                                </div>
+                              )}
                               <button 
                                 onClick={(e) => deleteTemplate(tpl.id, e)}
-                                className="absolute top-2 right-2 p-1.5 bg-rose-50 text-rose-400 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="absolute bottom-2 right-2 p-1.5 bg-rose-50 text-rose-400 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
@@ -2149,14 +2190,14 @@ export default function App() {
                       <div className="space-y-4">
                         <div className="flex items-center justify-between px-2">
                           <label className="text-xs font-black text-slate-400 uppercase tracking-widest">
-                            {selectedTemplateId ? '当前模板属性' : 'AI 自由发挥 / 参考内容'}
+                            {selectedTemplateIds.length > 0 ? (selectedTemplateIds.length === 1 ? '编辑当前模板' : `混合拼接 (${selectedTemplateIds.length}个)`) : 'AI 自由发挥 / 参考内容'}
                           </label>
                           <div className="flex gap-2">
                             <input 
                               type="text"
                               value={newTemplateName}
                               onChange={e => setNewTemplateName(e.target.value)}
-                              placeholder="模板名称"
+                              placeholder={selectedTemplateIds.length > 1 ? "混合模板名称" : "模板名称"}
                               className="w-24 px-3 py-1.5 text-[10px] border border-slate-200 rounded-xl focus:outline-none focus:border-slate-400 transition-all font-bold"
                             />
                             <button 
@@ -2165,7 +2206,7 @@ export default function App() {
                               className="bg-slate-900 text-white px-4 py-1.5 rounded-xl text-[10px] font-black hover:bg-slate-800 transition-all disabled:opacity-20 flex items-center gap-1.5"
                             >
                               {isSavingTemplate && <Loader2 className="w-3 h-3 animate-spin" />}
-                              {selectedTemplateId ? '更新' : '保存'}
+                              {selectedTemplateIds.length === 1 ? '更新' : '另存为新模板'}
                             </button>
                           </div>
                         </div>
