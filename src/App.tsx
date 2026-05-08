@@ -25,7 +25,8 @@ import {
   MapPin,
   X,
   RefreshCw,
-  Trash
+  Trash,
+  Video
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Cropper, { Point, Area } from 'react-easy-crop';
@@ -72,6 +73,12 @@ interface ApiProfile {
   config: ApiConfig;
 }
 
+interface BriefBlock {
+  id: string;
+  type: 'text' | 'image' | 'video';
+  content: string;
+}
+
 interface Property {
   id: string;
   name: string;
@@ -94,6 +101,8 @@ interface Property {
   elevatorRatio?: string; // 梯户比
   projectBrief?: string; // 项目资料
   projectImages?: string[]; // 项目资料图片
+  videoUrl?: string; // 房源视频
+  briefBlocks?: BriefBlock[]; // 新版：图文视频穿插资料
   createdAt: number;
 }
 
@@ -329,38 +338,67 @@ export default function App() {
   }, [editingProp?.address]);
 
   const downloadProjectBrief = (prop: Property) => {
-    const content = `
-【项目名称】：${prop.name}
-【所属板块】：${prop.area}
-【详细地址】：${prop.address || '暂无'}
-【在售楼层】：${prop.saleFloor || '暂无'}
-【在售面积】：${prop.saleArea || '暂无'}
-【均价总价】：${prop.totalPrice}
-【预计首付】：${prop.downPayment}
-【户型规格】：${prop.layout}
-【水电煤】：${prop.utilities || '暂无'}
-【通煤气】：${prop.hasGas ? '是' : '否'}
-【物业费】：${prop.propertyFee || '暂无'}
-【停车位】：${prop.parking || '暂无'}
-【梯户比】：${prop.elevatorRatio || '暂无'}
+    // Generate a rich HTML visual brief focusing ONLY on the Project Brief section
+    const imagesHtml = (prop.projectImages || []).map(img => `
+      <div style="break-inside: avoid; margin-bottom: 20px;">
+        <img src="${img}" style="width: 100%; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);" />
+      </div>
+    `).join('');
 
-【核心卖点】：
-${prop.sellingPoints}
+    const videoHtml = prop.videoUrl ? `
+      <div style="margin-bottom: 30px;">
+        <h2 style="font-size: 16px; font-weight: 800; color: #64748b; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+          <span>房源视频资料</span>
+        </h2>
+        <video src="${prop.videoUrl}" controls style="width: 100%; border-radius: 16px; background: #000; display: block;"></video>
+      </div>
+    ` : '';
 
-【配套设施】：
-${prop.nearbyFacilities || '暂无'}
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${prop.name} - 项目资料</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.6; padding: 40px 20px; }
+    .container { max-width: 700px; margin: 0 auto; background: white; border-radius: 32px; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.12); overflow: hidden; }
+    .header { background: #0f172a; color: white; padding: 40px; }
+    .header h1 { margin: 0; font-size: 28px; font-weight: 900; letter-spacing: -0.025em; }
+    .header p { margin: 8px 0 0; opacity: 0.6; font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+    .content { padding: 40px; }
+    .text-block { font-size: 16px; color: #334155; white-space: pre-wrap; margin-bottom: 30px; word-break: break-word; }
+    .images-grid { column-count: 2; column-gap: 20px; }
+    @media (max-width: 640px) { .images-grid { column-count: 1; } }
+    .footer { margin-top: 60px; text-align: center; font-size: 12px; color: #94a3b8; padding-top: 30px; border-top: 1px solid #f1f5f9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>${prop.name}</h1>
+      <p>Project Detailed Materials</p>
+    </div>
+    <div class="content">
+      ${videoHtml}
+      <div class="text-block">${prop.projectBrief || '暂无详细文字介绍'}</div>
+      <div class="images-grid">
+        ${imagesHtml}
+      </div>
+      <div class="footer">
+        文档生成于：${new Date().toLocaleString()} | 上海房地产智能管理系统
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+    `;
 
-【项目简介】：
-${prop.projectBrief || '暂无'}
-
-【生成时间】：${new Date(prop.createdAt).toLocaleString()}
-    `.trim();
-
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${prop.name}_项目简报.txt`;
+    link.download = `${prop.name}_项目资料.html`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -495,7 +533,7 @@ ${prop.projectBrief || '暂无'}
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取深度房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、首付、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、核心卖点、附近配套、在售楼层、在售面积、项目资料。请务必同时提取总价和均价信息。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、首付、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、核心卖点、附近配套、在售楼层、在售面积。请务必同时提取总价和均价信息。注意：不要尝试提取项目详细介绍或图片汇总描述到项目资料中。' 
             },
             { role: 'user', content: userContent }
           ],
@@ -536,7 +574,7 @@ ${prop.projectBrief || '暂无'}
         nearbyFacilities: ensureString(extracted.附近配套),
         saleFloor: ensureString(extracted.在售楼层),
         saleArea: ensureString(extracted.在售面积),
-        projectBrief: ensureString(extracted.项目资料),
+        projectBrief: '',
         projectImages: [],
         createdAt: Date.now(),
         userId: auth.currentUser?.uid || 'anonymous'
@@ -1660,13 +1698,13 @@ ${prop.projectBrief || '暂无'}
                          {/* Footer indicators & Actions */}
                          <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-1">
                             <div className="flex gap-1 items-center">
-                              {prop.videoUrl && <div className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />}
+                              {prop.videoUrl && <Video className="w-3 h-3 text-rose-500 animate-pulse" />}
                               {(prop.projectImages?.length || 0) > 0 && <Camera className="w-3 h-3 text-slate-300" />}
                             </div>
                             <button 
                               onClick={(e) => { e.stopPropagation(); downloadProjectBrief(prop); }}
                               className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 hover:bg-blue-500 hover:text-white transition-all flex items-center justify-center shadow-sm border border-blue-100"
-                              title="下载房源简报"
+                              title="下载房源资料"
                             >
                                <Download className="w-4 h-4" />
                             </button>
@@ -2132,32 +2170,57 @@ ${prop.projectBrief || '暂无'}
                             </label>
                           </div>
 
-                          {editingProp.projectImages && editingProp.projectImages.length > 0 && (
-                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-                              {editingProp.projectImages.map((img, idx) => (
-                                <div key={idx} className="relative group/img aspect-square rounded-2xl overflow-hidden border border-slate-100 shadow-sm transition-transform hover:scale-105">
-                                  <img src={img} className="w-full h-full object-cover" />
-                                  <button 
-                                    onClick={() => {
-                                      const newImgs = [...(editingProp.projectImages || [])];
-                                      newImgs.splice(idx, 1);
-                                      setEditingProp({ ...editingProp, projectImages: newImgs });
-                                    }}
-                                    className="absolute inset-0 bg-rose-500/80 text-white opacity-0 group-hover/img:opacity-100 transition-all flex items-center justify-center"
-                                  >
-                                    <X className="w-5 h-5" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
 
-                          <textarea 
-                            value={editingProp.projectBrief || ''}
-                            onChange={e => setEditingProp({ ...editingProp, projectBrief: e.target.value })}
-                            placeholder="项目详细介绍、楼盘参数、图片汇总描述等原文..."
-                            className="w-full h-64 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed shadow-inner"
-                          />
+
+                             <div className="bg-slate-50/50 rounded-[2.5rem] p-8 border-2 border-slate-100/50 space-y-8">
+                               {/* Note Content Area */}
+                               <textarea 
+                                 value={editingProp.projectBrief || ''}
+                                 onChange={e => setEditingProp({ ...editingProp, projectBrief: e.target.value })}
+                                 placeholder="在这里输入项目的详细介绍文字、楼盘卖点汇总..."
+                                 className="w-full h-40 bg-transparent outline-none transition-all resize-none font-bold text-slate-800 text-lg leading-relaxed placeholder:text-slate-300"
+                               />
+                               <div className="space-y-6">
+                                 {editingProp.videoUrl && (
+                                   <div className="relative rounded-[2rem] overflow-hidden bg-black aspect-video shadow-2xl group ring-1 ring-white/20">
+                                     <video src={editingProp.videoUrl} controls className="w-full h-full object-contain" />
+                                     <button 
+                                       onClick={() => setEditingProp({ ...editingProp, videoUrl: undefined })}
+                                       className="absolute top-4 right-4 p-3 bg-white/20 backdrop-blur-md hover:bg-rose-500 text-white rounded-full transition-all opacity-0 group-hover:opacity-100 z-10"
+                                     >
+                                       <Trash2 className="w-5 h-5" />
+                                     </button>
+                                   </div>
+                                 )}
+
+                                 {editingProp.projectImages && editingProp.projectImages.length > 0 && (
+                                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                                     {editingProp.projectImages.map((img, idx) => (
+                                       <div key={idx} className="relative group/img aspect-square rounded-[1.5rem] overflow-hidden border-2 border-white shadow-xl transition-all hover:scale-[1.03] hover:rotate-1">
+                                         <img src={img} className="w-full h-full object-cover" />
+                                         <button 
+                                           onClick={() => {
+                                             const newImgs = [...(editingProp.projectImages || [])];
+                                             newImgs.splice(idx, 1);
+                                             setEditingProp({ ...editingProp, projectImages: newImgs });
+                                           }}
+                                           className="absolute inset-0 bg-rose-500/90 text-white opacity-0 group-hover/img:opacity-100 transition-all flex items-center justify-center backdrop-blur-sm"
+                                         >
+                                           <X className="w-6 h-6" />
+                                         </button>
+                                       </div>
+                                     ))}
+                                   </div>
+                                 )}
+                               </div>
+
+                               {(!editingProp.projectBrief && !editingProp.videoUrl && (!editingProp.projectImages || editingProp.projectImages.length === 0)) && (
+                                 <div className="py-20 flex flex-col items-center justify-center text-center opacity-20 filter grayscale">
+                                   <Database className="w-16 h-16 mb-4" />
+                                   <p className="font-black">深度资料区是空的</p>
+                                 </div>
+                               )}
+                             </div>
                        </div>
                     </div>
                  </div>
@@ -2174,11 +2237,11 @@ ${prop.projectBrief || '暂无'}
                     <motion.button 
                       whileTap={{ scale: 0.98 }}
                       whileHover={{ backgroundColor: '#eff6ff' }}
-                      onClick={() => downloadProjectBrief(editingProp)}
+                      onClick={() => downloadProjectData(editingProp)}
                       className="px-8 py-5 bg-blue-50 text-blue-500 rounded-[2rem] font-black text-lg transition-all border border-blue-100 flex items-center justify-center gap-2"
                     >
                       <Download className="w-5 h-5" />
-                      下载简报
+                      下载资料
                     </motion.button>
                     <motion.button 
                       whileTap={{ scale: 0.98 }}
