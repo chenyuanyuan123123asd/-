@@ -23,9 +23,12 @@ import {
   Menu,
   Check,
   MapPin,
-  X
+  X,
+  RefreshCw,
+  Trash
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Cropper, { Point, Area } from 'react-easy-crop';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { 
@@ -178,6 +181,15 @@ export default function App() {
   const [matchRequest, setMatchRequest] = useState('');
   const [matchMode, setMatchMode] = useState<'concise' | 'professional'>('concise');
   const [matchHistory, setMatchHistory] = useState<MatchMessage[]>([]);
+  const [customBg, setCustomBg] = useState<string | null>(localStorage.getItem('sh_apt_helper_custom_bg'));
+  
+  // Image Crop State
+  const [cropImage, setCropImage] = useState<string | null>(null);
+  const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [aspect, setAspect] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [onCropDone, setOnCropDone] = useState<(dataUrl: string) => void>(() => () => {});
   const [broadcastResult, setBroadcastResult] = useState('');
   const [broadcastMode, setBroadcastMode] = useState<'auto' | 'template'>('auto');
   const [broadcastTemplate, setBroadcastTemplate] = useState('');
@@ -629,16 +641,94 @@ ${prop.projectBrief || '暂无'}
     const file = e.target.files?.[0] as File;
     if (!file || !editingProp) return;
     
-    if (file.size > 2 * 1024 * 1024) {
-      setError('文件超过 2MB，请压缩后再试');
+    if (file.size > 5 * 1024 * 1024) {
+      setError('文件超过 5MB');
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      setEditingProp({ ...editingProp, [field]: event.target?.result as string });
+      const dataUrl = event.target?.result as string;
+      if (field === 'imageUrl') {
+        setAspect(4/3); // Housing photo aspect ratio
+        setCropImage(dataUrl);
+        setOnCropDone(() => (croppedUrl: string) => {
+          setEditingProp({ ...editingProp, [field]: croppedUrl });
+          setCropImage(null);
+        });
+      } else {
+        setEditingProp({ ...editingProp, [field]: dataUrl });
+      }
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleBgUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setError('背景图片请不要超过 5MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      setAspect(window.innerWidth / window.innerHeight);
+      setCropImage(dataUrl);
+      setOnCropDone(() => (croppedUrl: string) => {
+        setCustomBg(croppedUrl);
+        localStorage.setItem('sh_apt_helper_custom_bg', croppedUrl);
+        setCropImage(null);
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ''; // Reset for same file
+  };
+
+  const createImage = (url: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+      const image = new Image();
+      image.addEventListener('load', () => resolve(image));
+      image.addEventListener('error', (error) => reject(error));
+      image.setAttribute('crossOrigin', 'anonymous');
+      image.src = url;
+    });
+
+  const getCroppedImg = async (imageSrc: string, pixelCrop: Area): Promise<string> => {
+    const image = await createImage(imageSrc);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) return '';
+
+    canvas.width = pixelCrop.width;
+    canvas.height = pixelCrop.height;
+
+    ctx.drawImage(
+      image,
+      pixelCrop.x,
+      pixelCrop.y,
+      pixelCrop.width,
+      pixelCrop.height,
+      0,
+      0,
+      pixelCrop.width,
+      pixelCrop.height
+    );
+
+    return canvas.toDataURL('image/jpeg');
+  };
+
+  const handleApplyCrop = async () => {
+    if (cropImage && croppedAreaPixels) {
+      try {
+        const croppedImage = await getCroppedImg(cropImage, croppedAreaPixels);
+        onCropDone(croppedImage);
+      } catch (e) {
+        console.error(e);
+      }
+    }
   };
 
   const handleProjectImagesUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -826,7 +916,7 @@ ${prop.projectBrief || '暂无'}
               <Sparkles className="w-10 h-10" />
             </div>
             <div className="space-y-1">
-              <h1 className="text-3xl font-serif font-black text-slate-800">沪公寓助手</h1>
+              <h1 className="text-3xl font-serif font-black text-slate-800">上海公寓小助手</h1>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">APARTMENT ASSISTANT</p>
             </div>
             <p className="text-slate-400 font-medium italic pt-4 px-4">输入用户名即可锁定您的云端房源</p>
@@ -896,8 +986,19 @@ ${prop.projectBrief || '暂无'}
   }
 
   return (
-    <div className={`min-h-screen ${t.gradient} text-slate-800 font-sans selection:bg-black/5 selection:text-slate-900 transition-colors duration-700`}>
-      {/* Header */}
+    <div className="min-h-screen relative text-slate-800 font-sans selection:bg-black/5 selection:text-slate-900 transition-colors duration-700">
+      {/* Fixed Background Layer to prevent jitters */}
+      <div 
+        className="fixed inset-0 z-[-1] pointer-events-none transition-all duration-700 bg-cover bg-center"
+        style={customBg 
+          ? { 
+              backgroundImage: `linear-gradient(rgba(255,255,255,0.7), rgba(255,255,255,0.7)), url(${customBg})`
+            } 
+          : { backgroundColor: 'transparent' } 
+        }
+      />
+      <div className={`min-h-screen ${customBg ? '' : t.gradient}`}>
+        {/* Header */}
       <header className="bg-white/60 backdrop-blur-3xl sticky top-0 z-50 border-b border-white/40 px-6 py-4 shadow-sm">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -905,7 +1006,7 @@ ${prop.projectBrief || '暂无'}
               <Sparkles className="text-white w-6 h-6 group-hover:scale-125 transition-transform" />
             </div>
             <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-900 font-serif leading-none italic uppercase">沪公寓助手</h1>
+              <h1 className="text-2xl font-black tracking-tight text-slate-900 font-serif leading-none italic uppercase">上海公寓小助手</h1>
               <p className={`text-[10px] ${t.primary} font-black tracking-[0.2em] mt-1`}>APARTMENT ASSISTANT</p>
             </div>
           </div>
@@ -974,7 +1075,7 @@ ${prop.projectBrief || '暂无'}
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div>
-                    <h1 className="font-serif font-black text-slate-800 text-base leading-none">沪公寓助手</h1>
+                    <h1 className="font-serif font-black text-slate-800 text-base leading-none">上海公寓小助手</h1>
                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1">APARTMENT ASSISTANT</p>
                   </div>
                 </div>
@@ -1059,16 +1160,32 @@ ${prop.projectBrief || '暂无'}
               
               <div className="grid gap-10 relative">
                 {/* Theme Selector */}
-                <div className="space-y-5">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-[0.3em] ml-1">界面整体色相</label>
+                <div className="space-y-8">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-[0.3em] ml-1">界面整体色相</label>
+                    <div className="flex gap-4">
+                      <label className="cursor-pointer text-[10px] font-black text-slate-400 hover:text-slate-600 flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-full transition-all">
+                        <Camera className="w-3 h-3" /> 自定义背景
+                        <input type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
+                      </label>
+                      {customBg && (
+                        <button 
+                          onClick={() => { setCustomBg(null); localStorage.removeItem('sh_apt_helper_custom_bg'); }}
+                          className="text-[10px] font-black text-rose-400 hover:text-rose-500 flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" /> 清除背景
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
                     {(Object.keys(THEMES) as ThemeMode[]).map(key => (
                       <button
                         key={key}
                         onClick={() => setTheme(key)}
                         className={`
-                          p-5 rounded-3xl border-2 transition-all flex flex-col items-center gap-3 relative group
-                          ${theme === key ? `border-slate-800 bg-white shadow-xl scale-105` : 'border-slate-100 bg-slate-50/50 hover:border-slate-200'}
+                          p-5 rounded-3xl border-2 transition-all flex flex-col items-center gap-3 relative group overflow-visible
+                          ${theme === key ? `border-slate-800 bg-white shadow-lg scale-105 z-10` : 'border-slate-100 bg-slate-50/50 hover:border-slate-200'}
                         `}
                       >
                         <div className={`w-12 h-12 rounded-2xl ${THEMES[key].secondary} shadow-lg shadow-${key}-200/50 transform group-hover:rotate-6 transition-transform`} />
@@ -1347,7 +1464,7 @@ ${prop.projectBrief || '暂无'}
               </div>
 
               {/* District Filter Slider */}
-              <div className="flex items-center gap-3 overflow-x-auto pb-4 px-2 scrollbar-hide">
+              <div className="flex items-center gap-3 overflow-x-auto pb-10 pt-4 px-4 scrollbar-hide -mx-4">
                 {['全部', ...Array.from(new Set(properties.map(p => {
                    const district = p.area.replace(/区$/, '');
                    return district;
@@ -1358,7 +1475,7 @@ ${prop.projectBrief || '暂无'}
                     className={`
                       px-8 py-3 rounded-2xl text-xs font-black transition-all whitespace-nowrap border-2
                       ${filterArea === area 
-                        ? `${t.secondary} border-transparent text-white shadow-xl scale-105` 
+                        ? `${t.secondary} border-transparent text-white shadow-lg scale-105 z-10` 
                         : 'bg-white border-slate-50 text-slate-400 hover:border-slate-200'}
                     `}
                   >
@@ -2092,6 +2209,68 @@ ${prop.projectBrief || '暂无'}
           </div>
         )}
       </AnimatePresence>
+
+      {/* Crop Modal */}
+      {cropImage && (
+        <div className="fixed inset-0 z-[1000] bg-slate-900/90 backdrop-blur-2xl flex flex-col items-center justify-center p-6">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-4xl bg-white rounded-[3rem] overflow-hidden shadow-2xl border-4 border-white flex flex-col"
+          >
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-xl font-black text-slate-800 font-serif">图片裁剪与适配</h3>
+              <button onClick={() => setCropImage(null)} className="p-3 hover:bg-slate-50 rounded-2xl transition-all">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="relative h-[50vh] bg-slate-100">
+              <Cropper
+                image={cropImage}
+                crop={crop}
+                zoom={zoom}
+                aspect={aspect}
+                onCropChange={setCrop}
+                onCropComplete={(_, pixels) => setCroppedAreaPixels(pixels)}
+                onZoomChange={setZoom}
+              />
+            </div>
+
+            <div className="p-8 bg-slate-50/50 flex flex-col gap-6">
+              <div className="flex items-center gap-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">缩放调整</span>
+                <input 
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  className="flex-grow h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-800"
+                />
+              </div>
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setCropImage(null)}
+                  className="flex-1 py-5 bg-white text-slate-400 rounded-3xl font-black text-lg hover:bg-slate-100 transition-all border border-slate-100 shadow-sm"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={handleApplyCrop}
+                  className={`flex-1 py-5 ${t.secondary} text-white rounded-3xl font-black text-lg shadow-xl shadow-slate-100 hover:-translate-y-1 active:scale-95 transition-all`}
+                >
+                  确认选区并应用
+                </button>
+              </div>
+            </div>
+          </motion.div>
+          <p className="mt-8 text-white/40 text-[10px] font-black tracking-[0.5em] uppercase animate-pulse">拖动图片调整位置 · 滚轮或滑块缩放</p>
+        </div>
+      )}
     </div>
-  );
+  </div>
+);
 }
