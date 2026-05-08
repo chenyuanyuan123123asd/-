@@ -1,12 +1,55 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /properties/{propertyId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
+    // 0. Global Safety Net
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    // Phase 3: Primitive Definition
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+
+    // Validation Helpers
+    function isValidProperty(data) {
+      return data.keys().hasAll(['id', 'name', 'userId']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 200 &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidTemplate(data) {
+      return data.keys().hasAll(['id', 'name', 'content', 'userId']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() <= 100 &&
+             data.content is string && data.content.size() <= 2000 &&
+             data.userId == request.auth.uid;
+    }
+
+    // Collections
+    match /properties/{propertyId} {
+      allow get: if isSignedIn() && isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(propertyId) && isValidProperty(incoming());
+      allow update: if isSignedIn() && isOwner(existing().userId) && isValidProperty(incoming()) && (
+        incoming().userId == existing().userId &&
+        incoming().id == existing().id
+      );
+      allow delete: if isSignedIn() && isOwner(existing().userId);
+    }
+
+    match /broadcastTemplates/{templateId} {
+      allow get: if isSignedIn() && isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(templateId) && isValidTemplate(incoming());
+      allow update: if isSignedIn() && isOwner(existing().userId) && isValidTemplate(incoming()) && (
+        incoming().userId == existing().userId &&
+        incoming().id == existing().id
+      );
+      allow delete: if isSignedIn() && isOwner(existing().userId);
     }
   }
 }

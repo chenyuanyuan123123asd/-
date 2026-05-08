@@ -187,6 +187,43 @@ const BROADCAST_STYLES = [
   { id: 'urgent', label: '紧急清盘', desc: '最后席位，制造稀缺感', emoji: '⌛' }
 ];
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  return new Error(JSON.stringify(errInfo));
+}
+
 export default function App() {
   // --- State ---
   const [activeTab, setActiveTab] = useState<'config' | 'input' | 'database' | 'match' | 'broadcast'>('database');
@@ -255,11 +292,13 @@ export default function App() {
       await addDoc(collection(db, 'broadcastTemplates'), {
         name: newTemplateName,
         content: broadcastTemplate,
+        userId: auth.currentUser?.uid,
         createdAt: serverTimestamp()
       });
       setNewTemplateName('');
       setError(null);
     } catch (err: any) {
+      const error = handleFirestoreError(err, OperationType.WRITE, 'broadcastTemplates');
       setError(`模板保存失败: ${err.message}`);
     } finally {
       setIsSavingTemplate(false);
@@ -275,6 +314,7 @@ export default function App() {
         setBroadcastTemplate('');
       }
     } catch (err: any) {
+      handleFirestoreError(err, OperationType.DELETE, `broadcastTemplates/${id}`);
       setError(`模板删除失败: ${err.message}`);
     }
   };
@@ -295,7 +335,11 @@ export default function App() {
       setUser(u);
       if (u) {
         // Sync User specific properties
-        const qProps = query(collection(db, 'properties'), orderBy('createdAt', 'desc'));
+        const qProps = query(
+          collection(db, 'properties'), 
+          where('userId', '==', u.uid),
+          orderBy('createdAt', 'desc')
+        );
         const unsubProps = onSnapshot(qProps, (snapshot) => {
           const props: Property[] = snapshot.docs.map(doc => ({
             id: doc.id,
@@ -303,11 +347,16 @@ export default function App() {
           } as Property));
           setProperties(props);
         }, (err) => {
+          handleFirestoreError(err, OperationType.LIST, 'properties');
           setError(`房源同步失败: ${err.message}`);
         });
 
         // Sync Broadcast Templates
-        const qBroad = query(collection(db, 'broadcastTemplates'), orderBy('createdAt', 'desc'));
+        const qBroad = query(
+          collection(db, 'broadcastTemplates'), 
+          where('userId', '==', u.uid),
+          orderBy('createdAt', 'desc')
+        );
         const unsubBroad = onSnapshot(qBroad, (snapshot) => {
           const broadList = snapshot.docs.map(doc => ({
             id: doc.id,
@@ -315,6 +364,7 @@ export default function App() {
           })) as BroadcastTemplate[];
           setBroadcastTemplates(broadList);
         }, (err) => {
+          handleFirestoreError(err, OperationType.LIST, 'broadcastTemplates');
           setError(`模板同步失败: ${err.message}`);
         });
 
@@ -500,6 +550,7 @@ export default function App() {
       }
       setConfirmDeleteId(null);
     } catch (err: any) {
+      handleFirestoreError(err, OperationType.DELETE, `properties/${confirmDeleteId}`);
       setError(`删除失败: ${err.message}`);
     }
   };
@@ -711,8 +762,10 @@ export default function App() {
         projectImages: [],
         briefBlocks: extracted.项目资料 ? [{ id: Math.random().toString(36).substr(2, 9), type: 'text', content: ensureString(extracted.项目资料) }] : [],
         createdAt: Date.now(),
-        userId: auth.currentUser?.uid || 'anonymous'
+        userId: auth.currentUser?.uid
       };
+
+      if (!propData.userId) throw new Error('用户未登录，无法保存房源');
 
       await addDoc(collection(db, 'properties'), propData);
 
@@ -720,6 +773,7 @@ export default function App() {
       setExtractImages([]);
       setActiveTab('database');
     } catch (err: any) {
+      const error = handleFirestoreError(err, OperationType.WRITE, 'properties');
       setError(`AI 解析失败: ${err.message}`);
     } finally {
       setIsExtracting(false);
@@ -1126,6 +1180,7 @@ export default function App() {
     try {
       await deleteDoc(doc(db, 'properties', id));
     } catch (err: any) {
+      handleFirestoreError(err, OperationType.DELETE, `properties/${id}`);
       setError(`删除失败: ${err.message}`);
     }
   };
@@ -1136,6 +1191,7 @@ export default function App() {
       await updateDoc(doc(db, 'properties', id), data as any);
       setEditingProp(null);
     } catch (err: any) {
+      handleFirestoreError(err, OperationType.WRITE, `properties/${updated.id}`);
       setError(`更新失败: ${err.message}`);
     }
   };

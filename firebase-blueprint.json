@@ -22,12 +22,29 @@
         "userId": { "type": "string" }
       },
       "required": ["id", "name", "userId"]
+    },
+    "BroadcastTemplate": {
+      "title": "Broadcast Template",
+      "description": "Templates for broadcast messages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "content": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "content", "userId"]
     }
   },
   "firestore": {
     "/properties/{propertyId}": {
       "schema": "Property",
       "description": "Collection of properties"
+    },
+    "/broadcastTemplates/{templateId}": {
+      "schema": "BroadcastTemplate",
+      "description": "Collection of broadcast templates"
     }
   }
 }
