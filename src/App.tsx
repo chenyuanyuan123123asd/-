@@ -78,6 +78,8 @@ interface Property {
   area: string;
   address?: string;
   totalPrice: string;
+  averagePrice?: string; // 均价
+  priceDisplay?: string; // 处理后的显示价格
   totalPriceValue?: number; // Normalized price for sorting/matching
   downPayment: string;
   layout: string;
@@ -105,6 +107,7 @@ interface ExtractionResult {
   区域: string;
   地址?: string;
   总价: string;
+  均价?: string;
   总价数值?: number; 
   首付: string;
   面积与户型: string;
@@ -481,7 +484,7 @@ ${prop.projectBrief || '暂无'}
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】（如宣传海报、VR 截图、销售笔记等）中提取深度房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式，且不包含任何 Markdown 格式符号。字段包含：项目名、区域（必须是如“徐汇”、“闵行”等标准行政区）、地址、总价、总价数值、首付、面积与户型、水电煤（说明水/电/煤价格）、是否通煤气（布尔值）、物业费、停车位（提取停车场月租费用，仅输出数字或含金额的描述）、梯户比、核心卖点、附近配套、在售楼层、在售面积、项目资料（提取完整推介内容）。即使信息零散，也请发挥逻辑推断能力进行整合。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取深度房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、首付、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、核心卖点、附近配套、在售楼层、在售面积、项目资料。请务必同时提取总价和均价信息。' 
             },
             { role: 'user', content: userContent }
           ],
@@ -500,11 +503,16 @@ ${prop.projectBrief || '暂无'}
       const jsonStr = cleanJson(content);
       const extracted: ExtractionResult = JSON.parse(jsonStr);
 
+      const totalP = ensureString(extracted.总价);
+      const avgP = ensureString(extracted.均价);
+      
       const propData = {
         name: ensureString(extracted.项目名),
         area: ensureString(extracted.区域),
         address: ensureString(extracted.地址),
-        totalPrice: ensureString(extracted.总价),
+        totalPrice: totalP,
+        averagePrice: avgP,
+        priceDisplay: totalP && totalP !== '暂无' ? totalP : (avgP && avgP !== '暂无' ? avgP : '暂无'),
         totalPriceValue: extracted.总价数值,
         downPayment: ensureString(extracted.首付),
         layout: ensureString(extracted.面积与户型),
@@ -617,8 +625,8 @@ ${prop.projectBrief || '暂无'}
 
     const readers = files.map((file: File) => {
       return new Promise<string>((resolve, reject) => {
-        if (file.size > 4 * 1024 * 1024) {
-          reject(new Error(`${file.name} 超过 4MB`));
+        if (file.size > 8 * 1024 * 1024) {
+          reject(new Error(`${file.name} 超过 8MB`));
           return;
         }
         const reader = new FileReader();
@@ -641,19 +649,21 @@ ${prop.projectBrief || '暂无'}
     const file = e.target.files?.[0] as File;
     if (!file || !editingProp) return;
     
-    if (file.size > 5 * 1024 * 1024) {
-      setError('文件超过 5MB');
+    if (file.size > 8 * 1024 * 1024) {
+      setError('文件超过 8MB');
       return;
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUrl = event.target?.result as string;
       if (field === 'imageUrl') {
+        const compressedUrl = await compressImage(dataUrl, 400, 300); // Main image doesn't need to be huge
         setAspect(4/3); // Housing photo aspect ratio
-        setCropImage(dataUrl);
-        setOnCropDone(() => (croppedUrl: string) => {
-          setEditingProp({ ...editingProp, [field]: croppedUrl });
+        setCropImage(compressedUrl);
+        setOnCropDone(() => async (croppedUrl: string) => {
+          const finalUrl = await compressImage(croppedUrl, 400, 300);
+          setEditingProp({ ...editingProp, [field]: finalUrl });
           setCropImage(null);
         });
       } else {
@@ -667,18 +677,20 @@ ${prop.projectBrief || '暂无'}
   const handleBgUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setError('背景图片请不要超过 5MB');
+    if (file.size > 8 * 1024 * 1024) {
+      setError('背景图片请不要超过 8MB');
       return;
     }
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUrl = event.target?.result as string;
+      const compressedUrl = await compressImage(dataUrl, 1200, 800);
       setAspect(window.innerWidth / window.innerHeight);
-      setCropImage(dataUrl);
-      setOnCropDone(() => (croppedUrl: string) => {
-        setCustomBg(croppedUrl);
-        localStorage.setItem('sh_apt_helper_custom_bg', croppedUrl);
+      setCropImage(compressedUrl);
+      setOnCropDone(() => async (croppedUrl: string) => {
+        const finalUrl = await compressImage(croppedUrl, 1200, 800);
+        setCustomBg(finalUrl);
+        localStorage.setItem('sh_apt_helper_custom_bg', finalUrl);
         setCropImage(null);
       });
     };
@@ -731,6 +743,38 @@ ${prop.projectBrief || '暂无'}
     }
   };
 
+  const compressImage = async (dataUrl: string, maxWidth = 600, maxHeight = 600): Promise<string> => {
+    return new Promise(async (resolve) => {
+      const img = await createImage(dataUrl);
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height *= maxWidth / width;
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width *= maxHeight / height;
+          height = maxHeight;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      // More aggressive compression for many images
+      resolve(canvas.toDataURL('image/jpeg', 0.5));
+    });
+  };
+
+  const calculateTotalSize = (images: string[]) => {
+    return images.reduce((sum, img) => sum + img.length, 0);
+  };
+
   const handleProjectImagesUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0 || !editingProp) return;
@@ -743,8 +787,8 @@ ${prop.projectBrief || '暂无'}
 
     const readers = files.map((file: File) => {
       return new Promise<string>((resolve, reject) => {
-        if (file.size > 3 * 1024 * 1024) {
-          reject(new Error(`${file.name} 超过 3MB`));
+        if (file.size > 8 * 1024 * 1024) { // Allow slightly larger original upload before compression
+          reject(new Error(`${file.name} 超过 8MB`));
           return;
         }
         const reader = new FileReader();
@@ -755,10 +799,23 @@ ${prop.projectBrief || '暂无'}
     });
 
     Promise.all(readers)
-      .then(newImages => {
+      .then(async (newImages) => {
+        const compressedImages = await Promise.all(
+          newImages.map(img => compressImage(img))
+        );
+        
+        const nextImages = [...currentImages, ...compressedImages];
+        const totalSize = calculateTotalSize(nextImages);
+        
+        // Firestore limit is ~1MB. We should stay well below it for safety.
+        if (totalSize > 800 * 1024) {
+          setError('房源总附件大小已接近云端存储限制，请分批或使用更小的图片');
+          return;
+        }
+
         setEditingProp({ 
           ...editingProp, 
-          projectImages: [...currentImages, ...newImages] 
+          projectImages: nextImages 
         });
       })
       .catch(err => {
@@ -1390,7 +1447,7 @@ ${prop.projectBrief || '暂无'}
                 <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
                   <label className={`cursor-pointer flex items-center gap-3 px-6 md:px-8 py-5 md:py-6 bg-white border-2 border-slate-100 rounded-3xl md:rounded-[2rem] text-slate-800 font-black shadow-xl hover:-translate-y-1 transition-all active:scale-95 text-sm md:text-base`}>
                      <Camera className="w-5 h-5 md:w-6 md:h-6" />
-                     {extractImages.length > 0 ? '添加图片' : '识别图片信息'}
+                     {extractImages.length > 0 ? '添加图片' : '识别图片信息 (单张 ≤ 8MB)'}
                      <input type="file" accept="image/*" multiple className="hidden" onChange={handleExtractImage} />
                   </label>
 
@@ -1495,161 +1552,75 @@ ${prop.projectBrief || '暂无'}
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                   {properties.filter(p => filterArea === '全部' || p.area.includes(filterArea)).map(prop => (
                     <motion.div 
                       layout
                       key={prop.id}
                       onClick={() => setEditingProp(prop)}
-                      className={`group bg-white rounded-3xl border transition-all p-6 relative flex flex-col cursor-pointer overflow-hidden hover:shadow-2xl hover:border-theme-primary/20 transition-all duration-300 ${selectedPropIds.includes(prop.id) ? `border-slate-800 ring-4 ring-slate-100 shadow-2xl` : 'border-slate-100 shadow-sm hover:scale-[1.02]'}`}
-                      style={{ minHeight: '320px' }}
+                      className={`group bg-white rounded-[2rem] border transition-all p-4 relative flex flex-col cursor-pointer overflow-hidden hover:shadow-2xl hover:border-theme-primary/20 aspect-square ${selectedPropIds.includes(prop.id) ? `border-slate-800 ring-4 ring-slate-100 shadow-2xl` : 'border-slate-100 shadow-sm hover:scale-[1.02]'}`}
                     >
                       {/* Selection Badge */}
-                      <div className="absolute top-4 left-4 z-20">
+                      <div className="absolute top-2.5 left-2.5 z-20">
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
-                            togglePropSelection(prop.id);
+                            setSelectedPropIds(prev => 
+                              prev.includes(prop.id) 
+                                ? prev.filter(sid => sid !== prop.id) 
+                                : [...prev, prop.id]
+                            );
                           }}
-                          className={`w-6 h-6 rounded-full border-2 transition-all flex items-center justify-center ${
-                            selectedPropIds.includes(prop.id) 
-                            ? 'bg-slate-900 border-slate-900 text-white' 
-                            : 'bg-white/80 backdrop-blur-md border-slate-200 hover:border-theme-primary'
-                          }`}
+                          className={`w-5 h-5 rounded-full flex items-center justify-center border-2 transition-all ${selectedPropIds.includes(prop.id) ? 'bg-slate-900 border-slate-900 text-white scale-110' : 'bg-white/80 backdrop-blur-sm border-slate-200 text-transparent hover:border-slate-400'}`}
                         >
-                          {selectedPropIds.includes(prop.id) ? <Check className="w-3 h-3" /> : <div className="w-1.5 h-1.5 rounded-full bg-slate-200" />}
+                          <Check className="w-3 h-3" />
                         </button>
                       </div>
 
                       {/* Delete Button */}
-                      <div className="absolute top-4 right-4 z-20">
+                      <div className="absolute top-3 right-3 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
                          <button 
                            onClick={(e) => {
                              e.stopPropagation();
                              handleDeleteProp(prop.id);
                            }}
-                           className="w-10 h-10 rounded-full bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center shadow-sm"
+                           className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center shadow-sm"
                          >
-                           <Trash2 className="w-5 h-5" />
+                           <Trash2 className="w-4 h-4" />
                          </button>
                       </div>
 
-                      {/* Main Scroll Content */}
-                      <div className="mt-8 flex-grow overflow-y-auto pr-1 custom-scrollbar space-y-4 pt-2">
+                      <div className="flex flex-col h-full justify-between pt-6">
                          <div className="space-y-1">
-                           <h3 className="font-black text-xl text-slate-800 group-hover:text-theme-primary transition-colors line-clamp-2 leading-tight tracking-tight px-1">
+                           <h3 className="font-black text-base text-slate-800 group-hover:text-theme-primary transition-colors line-clamp-2 leading-tight tracking-tight px-1">
                              {prop.name}
                            </h3>
-                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">{prop.area}</p>
-                         </div>
-
-                         {/* Highlight Data - BIGGER TEXT */}
-                         <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
-                           <p className="font-black text-theme-primary text-2xl leading-none font-mono tracking-tight">
-                             {prop.totalPrice}
-                           </p>
-                           <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100/50">
-                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">在售面积</span>
-                              <span className="text-sm text-slate-700 font-black truncate">{prop.saleArea || '-'}</span>
+                           <div className="flex items-center gap-1.5 px-1">
+                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{prop.area.replace(/区$/, '')}</span>
                            </div>
                          </div>
 
-                         {/* Secondary info list */}
-                         <div className="space-y-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">
-                            <div className="flex justify-between items-center">
-                               <span>户型结构</span>
-                               <span className="text-slate-700 truncate max-w-[120px] font-black">{prop.layout}</span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                               <span>楼层范围</span>
-                               <span className="text-slate-700 truncate max-w-[120px] font-black">{prop.saleFloor || '-'}</span>
-                            </div>
-
-                            {/* Property Details Grid */}
-                            <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-100/50">
-                               <div className="bg-slate-50/50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center text-center group-hover:bg-white">
-                                 <span className="text-[8px] text-slate-400 mb-1">物业费</span>
-                                 <span className="text-[10px] text-slate-700 font-black truncate w-full">{prop.propertyFee || '-'}</span>
-                               </div>
-                               <div className="bg-slate-50/50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center text-center group-hover:bg-white">
-                                 <span className="text-[8px] text-slate-400 mb-1">梯户比</span>
-                                 <span className="text-[10px] text-slate-700 font-black truncate w-full">{prop.elevatorRatio || '-'}</span>
-                               </div>
-                               <div className="bg-slate-50/50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center text-center group-hover:bg-white">
-                                 <span className="text-[8px] text-slate-400 mb-1">停车月租</span>
-                                 <span className="text-[10px] text-slate-700 font-black truncate w-full">{prop.parking ? `${prop.parking}/月` : '-'}</span>
-                               </div>
-                               <div className={`p-2 rounded-xl border flex flex-col items-center justify-center text-center transition-all ${prop.hasGas ? 'bg-orange-50/80 border-orange-100 ring-2 ring-orange-50' : 'bg-slate-50/50 border-slate-100 group-hover:bg-white'}`}>
-                                 <span className="text-[8px] text-slate-400 mb-1">通煤气</span>
-                                 <span className={`text-[10px] font-black ${prop.hasGas ? 'text-orange-600' : 'text-slate-400 line-through opacity-50'}`}>
-                                   {prop.hasGas ? '是' : '无'}
-                                 </span>
-                               </div>
-                            </div>
-
-                            {prop.utilities && (
-                               <div className="mt-2 px-1">
-                                  <p className="text-[9px] text-slate-400 font-bold line-clamp-1 opacity-70 group-hover:opacity-100">
-                                     水/电/煤: {prop.utilities}
-                                  </p>
-                               </div>
-                            )}
+                         <div className="space-y-2 mb-2">
+                           <div className="bg-slate-50/50 p-2.5 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
+                             <p className="font-black text-theme-primary text-lg leading-none font-mono tracking-tighter truncate">
+                               {prop.priceDisplay || prop.totalPrice}
+                             </p>
+                           </div>
+                           
+                           <div className="flex items-center justify-between px-1">
+                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">在售面积</span>
+                              <span className="text-xs text-slate-700 font-black truncate">{prop.saleArea || '-'}</span>
+                           </div>
                          </div>
 
-                         {/* Tag lines */}
-                         <div className="pt-4 space-y-2 border-t border-slate-50 px-1">
-                           {ensureString(prop.sellingPoints).split(/[,，、]/).slice(0, 4).map((tag, i) => tag.trim() && (
-                             <div key={i} className="flex items-center gap-3">
-                               <div className="w-1.5 h-1.5 rounded-full bg-theme-primary/40" />
-                               <span className="text-[11px] text-slate-600 font-bold truncate leading-none">
-                                 {tag.trim()}
-                               </span>
-                             </div>
-                           ))}
-
-                           {/* Project Brief / Materials at Bottom */}
-                           {(prop.projectBrief || (prop.projectImages && prop.projectImages.length > 0)) && (
-                             <div className="pt-6 mt-2 border-t border-slate-100/50 opacity-60 group-hover:opacity-100 transition-opacity">
-                               <label className="text-[9px] font-black text-slate-400/50 uppercase tracking-[0.2em] mb-3 block">深度资料档案</label>
-                               
-                               {prop.projectImages && prop.projectImages.length > 0 && (
-                                 <div className="grid grid-cols-5 gap-1 mb-3">
-                                   {prop.projectImages.slice(0, 5).map((img, idx) => (
-                                     <div key={idx} className="aspect-square rounded-md overflow-hidden bg-white border border-slate-100 shadow-sm transition-transform hover:scale-110">
-                                       <img src={img} className="w-full h-full object-cover" />
-                                     </div>
-                                   ))}
-                                   {prop.projectImages.length > 5 && (
-                                     <div className="aspect-square rounded-md bg-slate-50 border border-slate-100 flex items-center justify-center text-[10px] font-black text-slate-400">
-                                       +{prop.projectImages.length - 5}
-                                     </div>
-                                   )}
-                                 </div>
-                               )}
-                               
-                               {prop.projectBrief && (
-                                 <p className="text-[11px] text-slate-500 font-bold line-clamp-2 leading-relaxed">
-                                   {prop.projectBrief}
-                                 </p>
-                               )}
-                             </div>
-                           )}
+                         {/* Footer indicators */}
+                         <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-1 opacity-40 group-hover:opacity-100 transition-all">
+                            <div className="flex gap-1">
+                              {prop.videoUrl && <div className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />}
+                              {(prop.projectImages?.length || 0) > 0 && <Camera className="w-3.5 h-3.5 text-slate-400" />}
+                            </div>
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">VIEW DETAILS</span>
                          </div>
-                      </div>
-
-                      {/* Footer */}
-                      <div className="mt-4 flex items-center justify-between pt-4 border-t border-slate-50 px-1">
-                          <div className="flex items-center gap-2 opacity-30 group-hover:opacity-100 transition-all">
-                            {prop.videoUrl && <div className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />}
-                            {prop.imageUrl && <Camera className="w-4 h-4 text-slate-400" />}
-                          </div>
-                          <button 
-                             onClick={(e) => { e.stopPropagation(); downloadProjectBrief(prop); }}
-                             className="text-[10px] font-black text-blue-500 hover:text-blue-600 flex items-center gap-2 transition-colors uppercase tracking-widest"
-                           >
-                             <Download className="w-4 h-4" />
-                             下载简报
-                           </button>
                       </div>
                     </motion.div>
                   ))}
@@ -2106,7 +2077,7 @@ ${prop.projectBrief || '暂无'}
                             </div>
                             <label className={`cursor-pointer px-6 py-3 flex items-center justify-center gap-2 ${t.secondary} text-white rounded-2xl active:scale-95 transition-all shadow-lg text-xs font-black`}>
                               <Camera className="w-4 h-4" />
-                              添加图片 (最多18张)
+                              添加图片 (最多18张) - 单张 ≤ 8MB
                               <input type="file" accept="image/*" multiple className="hidden" onChange={handleProjectImagesUpload} />
                             </label>
                           </div>
