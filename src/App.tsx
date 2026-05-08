@@ -92,7 +92,6 @@ interface Property {
   averagePrice?: string; // 均价
   priceDisplay?: string; // 处理后的显示价格
   totalPriceValue?: number; // Normalized price for sorting/matching
-  downPayment: string;
   layout: string;
   sellingPoints: string;
   nearbyFacilities?: string;
@@ -123,18 +122,17 @@ interface ExtractionResult {
   总价: string;
   均价?: string;
   总价数值?: number; 
-  首付: string;
   面积与户型: string;
   水电煤: string;
   是否通煤气: boolean;
   物业费: string;
   停车位: string;
   梯户比: string;
+  交通情况: string;
   核心卖点: string;
   附近配套?: string;
   在售楼层?: string;
   在售面积?: string;
-  交通?: string;
   项目资料?: string;
 }
 
@@ -599,7 +597,7 @@ export default function App() {
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、首付、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、核心卖点、附近配套、在售楼层、在售面积。请务必同时提取交通情况（离每个地铁站多远，只要地铁站，地铁不方便的加公交站，如果资料里没有写地铁站就自动搜索或整理你已知的地理信息来确认距离）。最后，将所有其他零散的卖点或补充说明总结到“项目资料”字段中。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。项目名必须使用中文，严禁输出任何英文名称。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、交通情况、核心卖点、附近配套、在售楼层、在售面积。关于交通情况：请务必详细提取离每个地铁站的距离，只要地铁站，地铁不方便的加公交站，如果资料里没有写地铁站，你必须根据项目地址自动确认距离。最后，将所有其他零散的卖点或补充说明总结到“项目资料”字段中。' 
             },
             { role: 'user', content: userContent }
           ],
@@ -629,18 +627,17 @@ export default function App() {
         averagePrice: avgP,
         priceDisplay: totalP && totalP !== '暂无' ? totalP : (avgP && avgP !== '暂无' ? avgP : '暂无'),
         totalPriceValue: extracted.总价数值,
-        downPayment: ensureString(extracted.首付),
         layout: ensureString(extracted.面积与户型),
         utilities: ensureString(extracted.水电煤),
         hasGas: Boolean(extracted.是否通煤气),
         propertyFee: ensureString(extracted.物业费),
         parking: ensureString(extracted.停车位),
         elevatorRatio: ensureString(extracted.梯户比),
+        transport: ensureString(extracted.交通情况),
         sellingPoints: ensureString(extracted.核心卖点),
         nearbyFacilities: ensureString(extracted.附近配套),
         saleFloor: ensureString(extracted.在售楼层),
         saleArea: ensureString(extracted.在售面积),
-        transport: ensureString(extracted.交通),
         projectBrief: ensureString(extracted.项目资料),
         projectImages: [],
         briefBlocks: extracted.项目资料 ? [{ id: Math.random().toString(36).substr(2, 9), type: 'text', content: ensureString(extracted.项目资料) }] : [],
@@ -1651,8 +1648,8 @@ export default function App() {
                       address: '',
                       totalPrice: '',
                       totalPriceValue: 0,
-                      downPayment: '',
                       layout: '',
+                      transport: '',
                       status: '待定',
                       sellingPoints: '',
                       nearbyFacilities: '',
@@ -2156,14 +2153,6 @@ export default function App() {
                          />
                        </div>
                        <div className="space-y-3">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">预计首付</label>
-                         <input 
-                           value={editingProp.downPayment}
-                           onChange={e => setEditingProp({ ...editingProp, downPayment: e.target.value })}
-                           className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800 font-mono"
-                         />
-                       </div>
-                       <div className="space-y-3">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">水/电/煤</label>
                          <input 
                            value={editingProp.utilities || ''}
@@ -2211,6 +2200,15 @@ export default function App() {
                          />
                        </div>
                        <div className="col-span-full space-y-3">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">交通情况</label>
+                         <textarea 
+                           value={editingProp.transport || ''}
+                           onChange={e => setEditingProp({ ...editingProp, transport: e.target.value })}
+                           placeholder="如：离1号线人民广场站300米；地铁不便时可搭乘123路公交..."
+                           className="w-full h-24 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed"
+                         />
+                       </div>
+                       <div className="col-span-full space-y-3">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">核心卖点提炼</label>
                          <textarea 
                            value={editingProp.sellingPoints}
@@ -2229,67 +2227,82 @@ export default function App() {
                        <div className="col-span-full space-y-6 pt-6 border-t border-slate-100">
                           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div>
-                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">项目深度推介资料 (深度信息/存档资料)</label>
-                               <p className="text-[10px] text-slate-300 font-bold mt-1">资料区将放在卡片最底部，方便随时调取原文</p>
+                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">项目深度推介资料 (图文穿插展示)</label>
+                               <p className="text-[10px] text-slate-300 font-bold mt-1">支持文字段落与图片交替排列，导出更为精美</p>
                             </div>
-                            <label className={`cursor-pointer px-6 py-3 flex items-center justify-center gap-2 ${t.secondary} text-white rounded-2xl active:scale-95 transition-all shadow-lg text-xs font-black`}>
-                              <Camera className="w-4 h-4" />
-                              添加图片 (最多18张) - 单张 ≤ 8MB
-                              <input type="file" accept="image/*" multiple className="hidden" onChange={handleProjectImagesUpload} />
-                            </label>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => addBlock('text')}
+                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-black transition-all flex items-center gap-2"
+                              >
+                                <TypeIcon className="w-3 h-3" />
+                                添加文字
+                              </button>
+                              <label className="cursor-pointer px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2">
+                                <ImageIcon className="w-3 h-3" />
+                                插入图片
+                                <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const reader = new FileReader();
+                                  reader.onload = (event) => {
+                                    if (event.target?.result && editingProp) {
+                                      const newBlock: BriefBlock = {
+                                        id: Math.random().toString(36).substr(2, 9),
+                                        type: 'image',
+                                        content: event.target.result as string
+                                      };
+                                      const blocks = [...(editingProp.briefBlocks || []), newBlock];
+                                      setEditingProp({ ...editingProp, briefBlocks: blocks });
+                                    }
+                                  };
+                                  reader.readAsDataURL(file);
+                                }} />
+                              </label>
+                            </div>
                           </div>
 
-
-
-                             <div className="bg-slate-50/50 rounded-[2.5rem] p-8 border-2 border-slate-100/50 space-y-8">
-                               {/* Note Content Area */}
-                               <textarea 
-                                 value={editingProp.projectBrief || ''}
-                                 onChange={e => setEditingProp({ ...editingProp, projectBrief: e.target.value })}
-                                 placeholder="在这里输入项目的详细介绍文字、楼盘卖点汇总..."
-                                 className="w-full h-40 bg-transparent outline-none transition-all resize-none font-bold text-slate-800 text-lg leading-relaxed placeholder:text-slate-300"
-                               />
-                               <div className="space-y-6">
-                                 {editingProp.videoUrl && (
-                                   <div className="relative rounded-[2rem] overflow-hidden bg-black aspect-video shadow-2xl group ring-1 ring-white/20">
-                                     <video src={editingProp.videoUrl} controls className="w-full h-full object-contain" />
-                                     <button 
-                                       onClick={() => setEditingProp({ ...editingProp, videoUrl: undefined })}
-                                       className="absolute top-4 right-4 p-3 bg-white/20 backdrop-blur-md hover:bg-rose-500 text-white rounded-full transition-all opacity-0 group-hover:opacity-100 z-10"
-                                     >
-                                       <Trash2 className="w-5 h-5" />
-                                     </button>
+                          <div className="space-y-4">
+                             {(editingProp.briefBlocks || []).length > 0 ? (
+                               (editingProp.briefBlocks || []).map((block, bIdx) => (
+                                 <motion.div 
+                                   layout
+                                   key={block.id} 
+                                   className="relative group bg-slate-50/50 rounded-[2rem] p-6 border-2 border-slate-100/50"
+                                 >
+                                   <div className="absolute -left-12 top-1/2 -translate-y-1/2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                      <button onClick={() => moveBlock(block.id, 'up')} className="p-2 bg-white shadow-md rounded-full text-slate-400 hover:text-blue-500"><ChevronUp className="w-4 h-4" /></button>
+                                      <button onClick={() => moveBlock(block.id, 'down')} className="p-2 bg-white shadow-md rounded-full text-slate-400 hover:text-blue-500 rotate-180"><ChevronUp className="w-4 h-4" /></button>
                                    </div>
-                                 )}
 
-                                 {editingProp.projectImages && editingProp.projectImages.length > 0 && (
-                                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                                     {editingProp.projectImages.map((img, idx) => (
-                                       <div key={idx} className="relative group/img aspect-square rounded-[1.5rem] overflow-hidden border-2 border-white shadow-xl transition-all hover:scale-[1.03] hover:rotate-1">
-                                         <img src={img} className="w-full h-full object-cover" />
-                                         <button 
-                                           onClick={() => {
-                                             const newImgs = [...(editingProp.projectImages || [])];
-                                             newImgs.splice(idx, 1);
-                                             setEditingProp({ ...editingProp, projectImages: newImgs });
-                                           }}
-                                           className="absolute inset-0 bg-rose-500/90 text-white opacity-0 group-hover/img:opacity-100 transition-all flex items-center justify-center backdrop-blur-sm"
-                                         >
-                                           <X className="w-6 h-6" />
-                                         </button>
-                                       </div>
-                                     ))}
-                                   </div>
-                                 )}
+                                   <button 
+                                     onClick={() => removeBlock(block.id)}
+                                     className="absolute -right-3 -top-3 p-2 bg-rose-500 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all z-10"
+                                   >
+                                     <X className="w-4 h-4" />
+                                   </button>
+
+                                   {block.type === 'text' ? (
+                                     <textarea 
+                                       value={block.content}
+                                       onChange={(e) => updateBlock(block.id, e.target.value)}
+                                       placeholder="输入该段落的介绍文字..."
+                                       className="w-full min-h-[80px] bg-transparent outline-none resize-none font-bold text-slate-800 text-lg leading-relaxed placeholder:text-slate-300"
+                                     />
+                                   ) : (
+                                     <div className="relative rounded-2xl overflow-hidden shadow-sm">
+                                       <img src={block.content} className="w-full h-auto object-cover max-h-[400px]" />
+                                     </div>
+                                   )}
+                                 </motion.div>
+                               ))
+                             ) : (
+                               <div className="py-20 flex flex-col items-center justify-center text-center opacity-20 filter grayscale">
+                                 <Database className="w-16 h-16 mb-4" />
+                                 <p className="font-black">开始构建您的图文深度资料</p>
                                </div>
-
-                               {(!editingProp.projectBrief && !editingProp.videoUrl && (!editingProp.projectImages || editingProp.projectImages.length === 0)) && (
-                                 <div className="py-20 flex flex-col items-center justify-center text-center opacity-20 filter grayscale">
-                                   <Database className="w-16 h-16 mb-4" />
-                                   <p className="font-black">深度资料区是空的</p>
-                                 </div>
-                               )}
-                             </div>
+                             )}
+                          </div>
                        </div>
                     </div>
                  </div>
