@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, ChangeEvent } from 'react';
+import React, { useState, useEffect, useCallback, ChangeEvent, useMemo } from 'react';
 import { 
   Settings, 
   Database, 
@@ -181,6 +181,17 @@ export default function App() {
   const [extractText, setExtractText] = useState('');
   const [extractImages, setExtractImages] = useState<string[]>([]);
   const [filterArea, setFilterArea] = useState<string>('全部');
+
+  // Performance Optimization: Memoize the filtered properties list to prevent recalculation on every render
+  const filteredProperties = useMemo(() => {
+    return properties.filter(p => filterArea === '全部' || p.area.includes(filterArea));
+  }, [properties, filterArea]);
+
+  // Performance Optimization: Memoize the district list for the filter slider
+  const districts = useMemo(() => {
+    const list = Array.from(new Set(properties.map(p => p.area.replace(/区$/, '')))).filter(Boolean);
+    return ['全部', ...list];
+  }, [properties]);
   const [matchRequest, setMatchRequest] = useState('');
   const [matchMode, setMatchMode] = useState<'concise' | 'professional'>('concise');
   const [matchHistory, setMatchHistory] = useState<MatchMessage[]>([]);
@@ -618,25 +629,56 @@ ${prop.projectBrief || '暂无'}
     const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
     
-    if (extractImages.length + files.length > 18) {
-      setError('单次最多选择 18 张图片');
+    if (extractImages.length + files.length > 20) {
+      setError('单次最多选择 20 张图片');
       return;
     }
 
-    const readers = files.map((file: File) => {
-      return new Promise<string>((resolve, reject) => {
-        if (file.size > 8 * 1024 * 1024) {
-          reject(new Error(`${file.name} 超过 8MB`));
-          return;
-        }
+    const processImage = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (event) => resolve(event.target?.result as string);
+        reader.onload = (event) => {
+          const img = new Image();
+          img.src = event.target?.result as string;
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1280; // Slightly larger for better OCR
+            const MAX_HEIGHT = 1280;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+              if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+              }
+            } else {
+              if (height > MAX_HEIGHT) {
+                width *= MAX_HEIGHT / height;
+                height = MAX_HEIGHT;
+              }
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
+              ctx.drawImage(img, 0, 0, width, height);
+            }
+            // Use 0.75 for a good balance of size and quality
+            resolve(canvas.toDataURL('image/jpeg', 0.75));
+          };
+          img.onerror = () => reject(new Error('图片加载失败'));
+        };
         reader.onerror = () => reject(new Error('读取失败'));
         reader.readAsDataURL(file);
       });
-    });
+    };
 
-    Promise.all(readers)
+    const processes = files.map((file: File) => processImage(file));
+
+    Promise.all(processes)
       .then(newImages => {
         setExtractImages(prev => [...prev, ...newImages]);
       })
@@ -1492,7 +1534,9 @@ ${prop.projectBrief || '暂无'}
                     {properties.length}
                   </span>
                 </div>
-                <button 
+                <motion.button 
+                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.02 }}
                   onClick={() => {
                     setEditingProp({
                       id: '',
@@ -1517,16 +1561,14 @@ ${prop.projectBrief || '暂无'}
                   className={`flex items-center gap-2 text-sm font-black ${t.primary} bg-white px-5 py-2.5 rounded-2xl shadow-sm hover:shadow-md transition-all border border-slate-50`}
                 >
                   <Plus className="w-4 h-4" /> 录入房源
-                </button>
+                </motion.button>
               </div>
 
               {/* District Filter Slider */}
               <div className="flex items-center gap-3 overflow-x-auto pb-10 pt-4 px-4 scrollbar-hide -mx-4">
-                {['全部', ...Array.from(new Set(properties.map(p => {
-                   const district = p.area.replace(/区$/, '');
-                   return district;
-                })))].filter(Boolean).map(area => (
-                  <button
+                {districts.map(area => (
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
                     key={area}
                     onClick={() => setFilterArea(area)}
                     className={`
@@ -1537,11 +1579,11 @@ ${prop.projectBrief || '暂无'}
                     `}
                   >
                     {area}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
 
-              {properties.filter(p => filterArea === '全部' || p.area.includes(filterArea)).length === 0 ? (
+              {filteredProperties.length === 0 ? (
                 <div className="bg-white/40 backdrop-blur-sm rounded-[4rem] p-32 border-4 border-white border-dashed flex flex-col items-center justify-center text-center space-y-8">
                   <div className="w-32 h-32 bg-white rounded-[3rem] shadow-2xl flex items-center justify-center rotate-6">
                     <Database className="w-12 h-12 text-slate-100" />
@@ -1553,12 +1595,14 @@ ${prop.projectBrief || '暂无'}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {properties.filter(p => filterArea === '全部' || p.area.includes(filterArea)).map(prop => (
+                  {filteredProperties.map(prop => (
                     <motion.div 
-                      layout
+                      layout="position"
+                      whileHover={{ y: -4 }}
+                      whileTap={{ scale: 0.98 }}
                       key={prop.id}
                       onClick={() => setEditingProp(prop)}
-                      className={`group bg-white rounded-[2rem] border transition-all p-4 relative flex flex-col cursor-pointer overflow-hidden hover:shadow-2xl hover:border-theme-primary/20 aspect-square ${selectedPropIds.includes(prop.id) ? `border-slate-800 ring-4 ring-slate-100 shadow-2xl` : 'border-slate-100 shadow-sm hover:scale-[1.02]'}`}
+                      className={`group bg-white rounded-[2rem] border p-4 relative flex flex-col cursor-pointer overflow-hidden shadow-sm transition-[border-color,box-shadow,background-color] duration-300 hover:shadow-2xl hover:border-theme-primary/20 aspect-square ${selectedPropIds.includes(prop.id) ? `border-slate-800 ring-4 ring-slate-100 shadow-2xl` : 'border-slate-100'}`}
                     >
                       {/* Selection Badge */}
                       <div className="absolute top-2.5 left-2.5 z-20">
@@ -1592,34 +1636,40 @@ ${prop.projectBrief || '暂无'}
 
                       <div className="flex flex-col h-full justify-between pt-6">
                          <div className="space-y-1">
-                           <h3 className="font-black text-base text-slate-800 group-hover:text-theme-primary transition-colors line-clamp-2 leading-tight tracking-tight px-1">
+                           <h3 className="font-black text-sm text-slate-800 group-hover:text-theme-primary transition-colors line-clamp-2 leading-tight tracking-tight px-1">
                              {prop.name}
                            </h3>
                            <div className="flex items-center gap-1.5 px-1">
-                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{prop.area.replace(/区$/, '')}</span>
+                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{prop.area.replace(/区$/, '')}</span>
                            </div>
                          </div>
 
-                         <div className="space-y-2 mb-2">
-                           <div className="bg-slate-50/50 p-2.5 rounded-2xl border border-slate-100 group-hover:bg-white transition-colors">
-                             <p className="font-black text-theme-primary text-lg leading-none font-mono tracking-tighter truncate">
+                         <div className="space-y-1.5 mb-1">
+                           <div className="bg-slate-50/50 p-2 rounded-xl border border-slate-100 group-hover:bg-white transition-colors">
+                             <p className="font-black text-theme-primary text-base leading-none font-mono tracking-tighter truncate">
                                {prop.priceDisplay || prop.totalPrice}
                              </p>
                            </div>
                            
                            <div className="flex items-center justify-between px-1">
-                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">在售面积</span>
-                              <span className="text-xs text-slate-700 font-black truncate">{prop.saleArea || '-'}</span>
+                              <span className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">面积</span>
+                              <span className="text-[11px] text-slate-700 font-black truncate">{prop.saleArea || '-'}</span>
                            </div>
                          </div>
 
-                         {/* Footer indicators */}
-                         <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-1 opacity-40 group-hover:opacity-100 transition-all">
-                            <div className="flex gap-1">
+                         {/* Footer indicators & Actions */}
+                         <div className="flex items-center justify-between pt-2 border-t border-slate-50 mt-1">
+                            <div className="flex gap-1 items-center">
                               {prop.videoUrl && <div className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />}
-                              {(prop.projectImages?.length || 0) > 0 && <Camera className="w-3.5 h-3.5 text-slate-400" />}
+                              {(prop.projectImages?.length || 0) > 0 && <Camera className="w-3 h-3 text-slate-300" />}
                             </div>
-                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">VIEW DETAILS</span>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); downloadProjectBrief(prop); }}
+                              className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 hover:bg-blue-500 hover:text-white transition-all flex items-center justify-center shadow-sm border border-blue-100"
+                              title="下载房源简报"
+                            >
+                               <Download className="w-4 h-4" />
+                            </button>
                          </div>
                       </div>
                     </motion.div>
@@ -2113,25 +2163,40 @@ ${prop.projectBrief || '暂无'}
                  </div>
 
                  <div className="p-10 pt-0 flex gap-5">
-                    <button 
+                    <motion.button 
+                      whileTap={{ scale: 0.98 }}
+                      whileHover={{ opacity: 0.9 }}
                       onClick={() => updateProperty(editingProp)}
-                      className={`flex-grow py-5 ${t.secondary} text-white rounded-[2rem] font-black text-xl shadow-2xl hover:opacity-90 active:scale-95 transition-all shadow-slate-200`}
+                      className={`flex-grow py-5 ${t.secondary} text-white rounded-[2rem] font-black text-xl shadow-2xl transition-all shadow-slate-200`}
                     >
                       保存并更新档案
-                    </button>
-                    <button 
-                      onClick={() => setEditingProp(null)}
-                      className="px-10 py-5 bg-slate-50 text-slate-400 rounded-[2rem] font-black text-lg hover:bg-slate-100 transition-all border border-slate-100"
+                    </motion.button>
+                    <motion.button 
+                      whileTap={{ scale: 0.98 }}
+                      whileHover={{ backgroundColor: '#eff6ff' }}
+                      onClick={() => downloadProjectBrief(editingProp)}
+                      className="px-8 py-5 bg-blue-50 text-blue-500 rounded-[2rem] font-black text-lg transition-all border border-blue-100 flex items-center justify-center gap-2"
                     >
-                      舍弃更改
-                    </button>
-                    <button 
+                      <Download className="w-5 h-5" />
+                      下载简报
+                    </motion.button>
+                    <motion.button 
+                      whileTap={{ scale: 0.98 }}
+                      whileHover={{ backgroundColor: '#f1f5f9' }}
+                      onClick={() => setEditingProp(null)}
+                      className="px-10 py-5 bg-slate-50 text-slate-400 rounded-[2rem] font-black text-lg transition-all border border-slate-100"
+                    >
+                      取消
+                    </motion.button>
+                    <motion.button 
+                      whileTap={{ scale: 0.9 }}
+                      whileHover={{ backgroundColor: '#fef2f2', color: '#ef4444' }}
                       onClick={() => editingProp && handleDeleteProp(editingProp.id)}
-                      className="p-5 border-2 border-red-50 text-red-100 hover:text-red-500 hover:bg-red-50 rounded-[2rem] transition-all"
+                      className="p-5 border-2 border-red-50 text-red-100 rounded-[2rem] transition-all"
                       title="删除房源"
                     >
                       <Trash2 className="w-5 h-5" />
-                    </button>
+                    </motion.button>
                  </div>
               </motion.div>
            </div>
