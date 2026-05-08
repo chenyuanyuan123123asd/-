@@ -78,14 +78,17 @@ interface Property {
   totalPriceValue?: number; // Normalized price for sorting/matching
   downPayment: string;
   layout: string;
-  status: string;
   sellingPoints: string;
   nearbyFacilities?: string;
-  imageUrl?: string;
-  videoUrl?: string;
   saleFloor?: string; // 在售楼层
   saleArea?: string;  // 在售面积
+  utilities?: string; // 水电煤价格
+  hasGas?: boolean;   // 是否通煤气
+  propertyFee?: string; // 物业费
+  parking?: string;    // 停车位
+  elevatorRatio?: string; // 梯户比
   projectBrief?: string; // 项目资料
+  projectImages?: string[]; // 项目资料图片
   createdAt: number;
 }
 
@@ -102,7 +105,11 @@ interface ExtractionResult {
   总价数值?: number; 
   首付: string;
   面积与户型: string;
-  交房状态: string;
+  水电煤: string;
+  是否通煤气: boolean;
+  物业费: string;
+  停车位: string;
+  梯户比: string;
   核心卖点: string;
   附近配套?: string;
   在售楼层?: string;
@@ -304,8 +311,12 @@ export default function App() {
 【在售面积】：${prop.saleArea || '暂无'}
 【均价总价】：${prop.totalPrice}
 【预计首付】：${prop.downPayment}
-【当前状态】：${prop.status}
 【户型规格】：${prop.layout}
+【水电煤】：${prop.utilities || '暂无'}
+【通煤气】：${prop.hasGas ? '是' : '否'}
+【物业费】：${prop.propertyFee || '暂无'}
+【停车位】：${prop.parking || '暂无'}
+【梯户比】：${prop.elevatorRatio || '暂无'}
 
 【核心卖点】：
 ${prop.sellingPoints}
@@ -458,7 +469,7 @@ ${prop.projectBrief || '暂无'}
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】（如宣传海报、VR 截图、销售笔记等）中提取深度房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式，且不包含任何 Markdown 格式符号。字段包含：项目名、区域（必须是如“徐汇”、“闵行”等标准行政区）、地址（尽量提取详细门牌号）、总价（如“450万”）、总价数值（用于排序的纯数字）、首付、面积与户型、交房状态、核心卖点（提取最诱人的 2-3 点）、附近配套（交通、学校、商圈）、在售楼层（如“高区”、“12层”）、在售面积（如“89-120平”）、项目资料（如有详细推介文本请汇总）。即使信息零散，也请发挥逻辑推断能力进行整合。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】（如宣传海报、VR 截图、销售笔记等）中提取深度房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式，且不包含任何 Markdown 格式符号。字段包含：项目名、区域（必须是如“徐汇”、“闵行”等标准行政区）、地址、总价、总价数值、首付、面积与户型、水电煤（说明水/电/煤价格）、是否通煤气（布尔值）、物业费、停车位（提取停车场月租费用，仅输出数字或含金额的描述）、梯户比、核心卖点、附近配套、在售楼层、在售面积、项目资料（提取完整推介内容）。即使信息零散，也请发挥逻辑推断能力进行整合。' 
             },
             { role: 'user', content: userContent }
           ],
@@ -485,12 +496,17 @@ ${prop.projectBrief || '暂无'}
         totalPriceValue: extracted.总价数值,
         downPayment: ensureString(extracted.首付),
         layout: ensureString(extracted.面积与户型),
-        status: ensureString(extracted.交房状态),
+        utilities: ensureString(extracted.水电煤),
+        hasGas: Boolean(extracted.是否通煤气),
+        propertyFee: ensureString(extracted.物业费),
+        parking: ensureString(extracted.停车位),
+        elevatorRatio: ensureString(extracted.梯户比),
         sellingPoints: ensureString(extracted.核心卖点),
         nearbyFacilities: ensureString(extracted.附近配套),
         saleFloor: ensureString(extracted.在售楼层),
         saleArea: ensureString(extracted.在售面积),
         projectBrief: ensureString(extracted.项目资料),
+        projectImages: [],
         createdAt: Date.now(),
         userId: auth.currentUser?.uid || 'anonymous'
       };
@@ -623,6 +639,41 @@ ${prop.projectBrief || '暂无'}
       setEditingProp({ ...editingProp, [field]: event.target?.result as string });
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleProjectImagesUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
+    if (files.length === 0 || !editingProp) return;
+
+    const currentImages = editingProp.projectImages || [];
+    if (currentImages.length + files.length > 18) {
+      setError('资料图片每套房源最多 18 张');
+      return;
+    }
+
+    const readers = files.map((file: File) => {
+      return new Promise<string>((resolve, reject) => {
+        if (file.size > 3 * 1024 * 1024) {
+          reject(new Error(`${file.name} 超过 3MB`));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(event.target?.result as string);
+        reader.onerror = () => reject(new Error('读取失败'));
+        reader.readAsDataURL(file);
+      });
+    });
+
+    Promise.all(readers)
+      .then(newImages => {
+        setEditingProp({ 
+          ...editingProp, 
+          projectImages: [...currentImages, ...newImages] 
+        });
+      })
+      .catch(err => {
+        setError(err.message);
+      });
   };
 
   const aiBroadcast = async () => {
@@ -1396,6 +1447,36 @@ ${prop.projectBrief || '暂无'}
                                <span>楼层范围</span>
                                <span className="text-slate-700 truncate max-w-[120px] font-black">{prop.saleFloor || '-'}</span>
                             </div>
+
+                            {/* Property Details Grid */}
+                            <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-100/50">
+                               <div className="bg-slate-50/50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center text-center group-hover:bg-white">
+                                 <span className="text-[8px] text-slate-400 mb-1">物业费</span>
+                                 <span className="text-[10px] text-slate-700 font-black truncate w-full">{prop.propertyFee || '-'}</span>
+                               </div>
+                               <div className="bg-slate-50/50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center text-center group-hover:bg-white">
+                                 <span className="text-[8px] text-slate-400 mb-1">梯户比</span>
+                                 <span className="text-[10px] text-slate-700 font-black truncate w-full">{prop.elevatorRatio || '-'}</span>
+                               </div>
+                               <div className="bg-slate-50/50 p-2 rounded-xl border border-slate-100 flex flex-col items-center justify-center text-center group-hover:bg-white">
+                                 <span className="text-[8px] text-slate-400 mb-1">停车月租</span>
+                                 <span className="text-[10px] text-slate-700 font-black truncate w-full">{prop.parking ? `${prop.parking}/月` : '-'}</span>
+                               </div>
+                               <div className={`p-2 rounded-xl border flex flex-col items-center justify-center text-center transition-all ${prop.hasGas ? 'bg-orange-50/80 border-orange-100 ring-2 ring-orange-50' : 'bg-slate-50/50 border-slate-100 group-hover:bg-white'}`}>
+                                 <span className="text-[8px] text-slate-400 mb-1">通煤气</span>
+                                 <span className={`text-[10px] font-black ${prop.hasGas ? 'text-orange-600' : 'text-slate-400 line-through opacity-50'}`}>
+                                   {prop.hasGas ? '是' : '无'}
+                                 </span>
+                               </div>
+                            </div>
+
+                            {prop.utilities && (
+                               <div className="mt-2 px-1">
+                                  <p className="text-[9px] text-slate-400 font-bold line-clamp-1 opacity-70 group-hover:opacity-100">
+                                     水/电/煤: {prop.utilities}
+                                  </p>
+                               </div>
+                            )}
                          </div>
 
                          {/* Tag lines */}
@@ -1408,6 +1489,34 @@ ${prop.projectBrief || '暂无'}
                                </span>
                              </div>
                            ))}
+
+                           {/* Project Brief / Materials at Bottom */}
+                           {(prop.projectBrief || (prop.projectImages && prop.projectImages.length > 0)) && (
+                             <div className="pt-6 mt-2 border-t border-slate-100/50 opacity-60 group-hover:opacity-100 transition-opacity">
+                               <label className="text-[9px] font-black text-slate-400/50 uppercase tracking-[0.2em] mb-3 block">深度资料档案</label>
+                               
+                               {prop.projectImages && prop.projectImages.length > 0 && (
+                                 <div className="grid grid-cols-5 gap-1 mb-3">
+                                   {prop.projectImages.slice(0, 5).map((img, idx) => (
+                                     <div key={idx} className="aspect-square rounded-md overflow-hidden bg-white border border-slate-100 shadow-sm transition-transform hover:scale-110">
+                                       <img src={img} className="w-full h-full object-cover" />
+                                     </div>
+                                   ))}
+                                   {prop.projectImages.length > 5 && (
+                                     <div className="aspect-square rounded-md bg-slate-50 border border-slate-100 flex items-center justify-center text-[10px] font-black text-slate-400">
+                                       +{prop.projectImages.length - 5}
+                                     </div>
+                                   )}
+                                 </div>
+                               )}
+                               
+                               {prop.projectBrief && (
+                                 <p className="text-[11px] text-slate-500 font-bold line-clamp-2 leading-relaxed">
+                                   {prop.projectBrief}
+                                 </p>
+                               )}
+                             </div>
+                           )}
                          </div>
                       </div>
 
@@ -1810,42 +1919,51 @@ ${prop.projectBrief || '暂无'}
                          />
                        </div>
                        <div className="space-y-3">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">当前去化状态</label>
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">水/电/煤</label>
                          <input 
-                           value={editingProp.status}
-                           onChange={e => setEditingProp({ ...editingProp, status: e.target.value })}
+                           value={editingProp.utilities || ''}
+                           onChange={e => setEditingProp({ ...editingProp, utilities: e.target.value })}
+                           placeholder="如：民用 0.61元/度"
+                           className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
+                         />
+                       </div>
+                       <div className="space-y-3 flex flex-col">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">是否通煤气</label>
+                          <button 
+                            type="button"
+                            onClick={() => setEditingProp({ ...editingProp, hasGas: !editingProp.hasGas })}
+                            className={`mt-1 h-[58px] w-full rounded-3xl font-black text-sm transition-all flex items-center justify-center gap-2 ${editingProp.hasGas ? 'bg-orange-500 text-white shadow-xl shadow-orange-100' : 'bg-slate-100 text-slate-400'}`}
+                          >
+                            <div className={`w-2.5 h-2.5 rounded-full ${editingProp.hasGas ? 'bg-white animate-pulse' : 'bg-slate-300'}`} />
+                            {editingProp.hasGas ? '通煤气' : '不通煤气'}
+                          </button>
+                       </div>
+                       <div className="space-y-3">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">物业费</label>
+                         <input 
+                           value={editingProp.propertyFee || ''}
+                           onChange={e => setEditingProp({ ...editingProp, propertyFee: e.target.value })}
+                           placeholder="元/平/月"
                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
                          />
                        </div>
                        <div className="space-y-3">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">宣传大图</label>
-                         <div className="flex gap-3">
-                           <input 
-                             value={editingProp.imageUrl || ''}
-                             onChange={e => setEditingProp({ ...editingProp, imageUrl: e.target.value })}
-                             placeholder="图片 URL"
-                             className="flex-grow px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
-                           />
-                           <label className={`cursor-pointer px-6 flex items-center justify-center ${t.secondary} text-white rounded-3xl active:scale-95 transition-all shadow-lg`}>
-                             <Plus className="w-5 h-5" />
-                             <input type="file" accept="image/*" className="hidden" onChange={e => handleFileUpload(e, 'imageUrl')} />
-                           </label>
-                         </div>
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">房源停车月租</label>
+                         <input 
+                           value={editingProp.parking || ''}
+                           onChange={e => setEditingProp({ ...editingProp, parking: e.target.value })}
+                           placeholder="输入月租金额（元/月）"
+                           className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
+                         />
                        </div>
                        <div className="space-y-3">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">视频内容</label>
-                         <div className="flex gap-3">
-                           <input 
-                             value={editingProp.videoUrl || ''}
-                             onChange={e => setEditingProp({ ...editingProp, videoUrl: e.target.value })}
-                             placeholder="视频 URL"
-                             className="flex-grow px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
-                           />
-                           <label className={`cursor-pointer px-6 flex items-center justify-center ${t.secondary} text-white rounded-3xl active:scale-95 transition-all shadow-lg`}>
-                             <Plus className="w-5 h-5" />
-                             <input type="file" accept="video/*" className="hidden" onChange={e => handleFileUpload(e, 'videoUrl')} />
-                           </label>
-                         </div>
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">梯户比</label>
+                         <input 
+                           value={editingProp.elevatorRatio || ''}
+                           onChange={e => setEditingProp({ ...editingProp, elevatorRatio: e.target.value })}
+                           placeholder="如：2梯4户"
+                           className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
+                         />
                        </div>
                        <div className="col-span-full space-y-3">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">核心卖点提炼</label>
@@ -1856,21 +1974,52 @@ ${prop.projectBrief || '暂无'}
                          />
                        </div>
                        <div className="col-span-full space-y-3">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">项目深度推介资料 (可将复制出的长文、图片列表粘贴于此)</label>
-                         <textarea 
-                           value={editingProp.projectBrief || ''}
-                           onChange={e => setEditingProp({ ...editingProp, projectBrief: e.target.value })}
-                           placeholder="项目详细介绍、楼盘参数、图片汇总描述等..."
-                           className="w-full h-48 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed"
-                         />
-                       </div>
-                       <div className="col-span-full space-y-3">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">配套设施说明</label>
                          <textarea 
                            value={editingProp.nearbyFacilities || ''}
                            onChange={e => setEditingProp({ ...editingProp, nearbyFacilities: e.target.value })}
                            className="w-full h-32 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed"
                          />
+                       </div>
+                       <div className="col-span-full space-y-6 pt-6 border-t border-slate-100">
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">项目深度推介资料 (深度信息/存档资料)</label>
+                               <p className="text-[10px] text-slate-300 font-bold mt-1">资料区将放在卡片最底部，方便随时调取原文</p>
+                            </div>
+                            <label className={`cursor-pointer px-6 py-3 flex items-center justify-center gap-2 ${t.secondary} text-white rounded-2xl active:scale-95 transition-all shadow-lg text-xs font-black`}>
+                              <Camera className="w-4 h-4" />
+                              添加图片 (最多18张)
+                              <input type="file" accept="image/*" multiple className="hidden" onChange={handleProjectImagesUpload} />
+                            </label>
+                          </div>
+
+                          {editingProp.projectImages && editingProp.projectImages.length > 0 && (
+                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+                              {editingProp.projectImages.map((img, idx) => (
+                                <div key={idx} className="relative group/img aspect-square rounded-2xl overflow-hidden border border-slate-100 shadow-sm transition-transform hover:scale-105">
+                                  <img src={img} className="w-full h-full object-cover" />
+                                  <button 
+                                    onClick={() => {
+                                      const newImgs = [...(editingProp.projectImages || [])];
+                                      newImgs.splice(idx, 1);
+                                      setEditingProp({ ...editingProp, projectImages: newImgs });
+                                    }}
+                                    className="absolute inset-0 bg-rose-500/80 text-white opacity-0 group-hover/img:opacity-100 transition-all flex items-center justify-center"
+                                  >
+                                    <X className="w-5 h-5" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <textarea 
+                            value={editingProp.projectBrief || ''}
+                            onChange={e => setEditingProp({ ...editingProp, projectBrief: e.target.value })}
+                            placeholder="项目详细介绍、楼盘参数、图片汇总描述等原文..."
+                            className="w-full h-64 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed shadow-inner"
+                          />
                        </div>
                     </div>
                  </div>
