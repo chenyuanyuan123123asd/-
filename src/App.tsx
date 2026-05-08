@@ -9,6 +9,7 @@ import {
   Database, 
   Sparkles, 
   Search, 
+  Home,
   Trash2, 
   Plus, 
   ChevronDown, 
@@ -146,6 +147,13 @@ interface ThemeConfig {
   label: string;
 }
 
+interface BroadcastTemplate {
+  id: string;
+  name: string;
+  content: string;
+  createdAt: any;
+}
+
 const THEMES: Record<ThemeMode, ThemeConfig> = {
   pink: { primary: 'text-rose-400', secondary: 'bg-rose-300', bg: 'bg-rose-50', accent: 'bg-rose-100/50', gradient: 'bg-theme-pink', label: '草莓圣代' },
   purple: { primary: 'text-purple-400', secondary: 'bg-purple-300', bg: 'bg-purple-50', accent: 'bg-purple-100/50', gradient: 'bg-theme-purple', label: '香芋奶冻' },
@@ -170,6 +178,14 @@ const DEFAULT_CONFIG: ApiConfig = {
   key: '',
   model: 'gemini-1.5-flash'
 };
+
+const BROADCAST_STYLES = [
+  { id: 'professional', label: '专业高端', desc: '资深经纪人风，沉稳得体', emoji: '🤵' },
+  { id: 'warm', label: '亲和温度', desc: '社群官家风，温馨自然', emoji: '🏡' },
+  { id: 'data', label: '数据价值', desc: '分析师视角，强调性价比', emoji: '📊' },
+  { id: 'social', label: '自媒体爆款', desc: '吸睛排版，带节奏高手', emoji: '🔥' },
+  { id: 'urgent', label: '紧急清盘', desc: '最后席位，制造稀缺感', emoji: '⌛' }
+];
 
 export default function App() {
   // --- State ---
@@ -196,14 +212,15 @@ export default function App() {
 
   // Performance Optimization: Memoize the filtered properties list to prevent recalculation on every render
   const filteredProperties = useMemo(() => {
-    return properties.filter(p => filterArea === '全部' || p.area.includes(filterArea));
+    return properties.filter(p => {
+      if (filterArea === '全部') return true;
+      const normalizedArea = p.area.replace(/区$/, '').replace(/新区$/, '');
+      return normalizedArea === filterArea;
+    });
   }, [properties, filterArea]);
 
   // Performance Optimization: Memoize the district list for the filter slider
-  const districts = useMemo(() => {
-    const list = Array.from(new Set(properties.map(p => p.area.replace(/区$/, '')))).filter(Boolean);
-    return ['全部', ...list];
-  }, [properties]);
+  const districts = ['全部', '黄浦', '徐汇', '长宁', '静安', '普陀', '虹口', '杨浦', '闵行', '宝山', '嘉定', '浦东', '金山', '松江', '青浦', '奉贤', '崇明'];
   const [matchRequest, setMatchRequest] = useState('');
   const [matchMode, setMatchMode] = useState<'concise' | 'professional'>('concise');
   const [matchHistory, setMatchHistory] = useState<MatchMessage[]>([]);
@@ -217,13 +234,50 @@ export default function App() {
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [onCropDone, setOnCropDone] = useState<(dataUrl: string) => void>(() => () => {});
   const [broadcastResult, setBroadcastResult] = useState('');
-  const [broadcastMode, setBroadcastMode] = useState<'auto' | 'template'>('auto');
+  const [broadcastTemplates, setBroadcastTemplates] = useState<BroadcastTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [broadcastTemplate, setBroadcastTemplate] = useState('');
   const [selectedPropIds, setSelectedPropIds] = useState<string[]>([]);
   const [editingProp, setEditingProp] = useState<Property | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const t = THEMES[theme];
+
+  const saveTemplate = async () => {
+    if (!newTemplateName.trim() || !broadcastTemplate.trim()) {
+      setError('请输入模板名称和内容');
+      return;
+    }
+    setIsSavingTemplate(true);
+    try {
+      await addDoc(collection(db, 'broadcastTemplates'), {
+        name: newTemplateName,
+        content: broadcastTemplate,
+        createdAt: serverTimestamp()
+      });
+      setNewTemplateName('');
+      setError(null);
+    } catch (err: any) {
+      setError(`模板保存失败: ${err.message}`);
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  };
+
+  const deleteTemplate = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await deleteDoc(doc(db, 'broadcastTemplates', id));
+      if (selectedTemplateId === id) {
+        setSelectedTemplateId(null);
+        setBroadcastTemplate('');
+      }
+    } catch (err: any) {
+      setError(`模板删除失败: ${err.message}`);
+    }
+  };
 
   // --- Effects ---
   useEffect(() => {
@@ -241,19 +295,36 @@ export default function App() {
       setUser(u);
       if (u) {
         // Sync User specific properties
-        const q = query(collection(db, 'properties'), orderBy('createdAt', 'desc'));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        const qProps = query(collection(db, 'properties'), orderBy('createdAt', 'desc'));
+        const unsubProps = onSnapshot(qProps, (snapshot) => {
           const props: Property[] = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
           } as Property));
           setProperties(props);
         }, (err) => {
-          setError(`Firebase 同步失败: ${err.message}`);
+          setError(`房源同步失败: ${err.message}`);
         });
-        return () => unsubscribe();
+
+        // Sync Broadcast Templates
+        const qBroad = query(collection(db, 'broadcastTemplates'), orderBy('createdAt', 'desc'));
+        const unsubBroad = onSnapshot(qBroad, (snapshot) => {
+          const broadList = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as BroadcastTemplate[];
+          setBroadcastTemplates(broadList);
+        }, (err) => {
+          setError(`模板同步失败: ${err.message}`);
+        });
+
+        return () => {
+          unsubProps();
+          unsubBroad();
+        };
       } else {
         setProperties([]);
+        setBroadcastTemplates([]);
       }
     });
 
@@ -596,7 +667,7 @@ export default function App() {
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。项目名必须【仅限中文】，绝对禁止包含任何英文单词、全称、缩写或英文字母（如：ANDI HOUSE 应提取为 安邸）。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、交通情况、核心卖点、附近配套、在售楼层、在售面积。关于交通情况：请务必详细提取离每个地铁站的距离，只要地铁站，地铁不方便的加公交站，如果资料里没有写地铁站，你必须根据项目地址自动确认距离。最后，将所有其他零散的卖点或补充说明总结到“项目资料”字段中。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。项目名必须【仅限中文】，绝对禁止包含任何英文单词、全称、缩写或英文字母（如：ANDI HOUSE 应提取为 安邸）。区域字段必须从以下 16 个区中选择一个（不要带“区”或“新区”字样）：黄浦、徐汇、长宁、静安、普陀、虹口、杨浦、闵行、宝山、嘉定、浦东、金山、松江、青浦、奉贤、崇明。例如“浦东新区”请提取为“浦东”。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、交通情况、核心卖点、附近配套、在售楼层、在售面积。关于交通情况：请务必详细提取离每个地铁站的距离，只要地铁站，地铁不方便的加公交站，如果资料里没有写地铁站，你必须根据项目地址自动确认距离。最后，将所有其他零散的卖点或补充说明总结到“项目资料”字段中。' 
             },
             { role: 'user', content: userContent }
           ],
@@ -680,8 +751,15 @@ export default function App() {
       }));
 
       const systemPrompt = `你是一个专业的房地产金牌顾问。请根据房源库提供匹配方案。
-      要求：
-      1. 请仔细分析房源的基本信息，并深度挖掘【项目资料】中的细节（如具体的装修标准、特殊的赠送空间、社区环境、开发商背景等）进行匹配。
+      
+      核心准则：
+      1. 优先在用户指定的区域中寻找匹配房源。
+      2. 如果指定区域内没有完美契合的项目，你【必须】跳出区域限制，在全上海范围内寻找更契合用户核心需求（如单价、总价、燃气、通勤）的替代方案。
+      3. 在推荐跨区房源时，必须给出令人信服的理由。不要简单说“价格便宜”，要从客户角度出发，比如：虽然不在您最初选择的区，但该项目就在地铁口，直达您关注的商圈，通勤效率甚至更高；或者该项目的品质和周边配套远超同价位区域项目。
+      4. 你的目标是为客户提供最优解，而不仅仅是刻板地执行筛选条件。要有温度、人性化，真正为客户着想。
+      
+      具体要求：
+      1. 请仔细分析房源基本信息，挖掘【项目资料】中的细节。
       2. 一次筛选 1-3 个最符合的项目。
       3. 严禁使用 **、###、-、* 等 Markdown 符号。
       4. 结构清爽，使用纯换行组织。
@@ -967,44 +1045,38 @@ export default function App() {
   };
 
   const aiBroadcast = async () => {
-    if (selectedPropIds.length === 0) return;
+    if (selectedPropIds.length === 0) {
+      setError('请先勾选需要生成的房源');
+      return;
+    }
     setIsBroadcasting(true);
     setError(null);
 
     try {
-      if (broadcastMode === 'template' && !broadcastTemplate.trim()) {
-        setError('请先输入模版格式再生成');
-        setIsBroadcasting(false);
-        return;
-      }
       const selectedProps = properties.filter(p => selectedPropIds.includes(p.id));
       
       let systemPrompt = '';
-      if (broadcastMode === 'auto') {
-        if (selectedPropIds.length === 1) {
-          systemPrompt = `你是一个上海顶级豪宅经纪人，擅长在朋友圈发【捡漏爆款】消息。
-          目标：为这【一个】房源生成极具视觉冲击力的短讯。
-          要求：
-          1. 第一行配合 Emoji 突出最强卖点（如：🔥送25平私人露台、🏠最后清盘、捡漏王炸）。
-          2. 核心参数精简：区域、板块名称、通燃气/民水民电（如有）、房型得房率、原价与现价对比。
-          3. 结尾话术：“您今天可以看一下房子吗？” 或 “手慢无，随时专车接送”。
-          4. 风格：禁忌废话，排版要透气，多用 [庆祝][嘿哈][色] 等 Emoji。`;
-        } else {
-          systemPrompt = `你是一个房产社群管家。请将选中的【多个房源】整理成一份精品清盘清单。
-          要求：
-          1. 头部问候：简短自然（如：晚上好，整理一些内部高性价比房源，发您看看）。
-          2. 房源排版：使用数字图标 1️⃣, 2️⃣... 每一个房源是一个独立块。
-          3. 结构：项目名+板块、面积、总价、核心标签（如 ✅通燃气 ✅内环内）、交通信息（如地铁0距离）。
-          4. 结尾总结：“需要资料请回复编号1-3🌈，或者随时看房，有专车接送”。
-          5. 严禁 Markdown 粗体，保持纯文字+Emoji。`;
-        }
-      } else if (broadcastMode === 'template') {
-        systemPrompt = `你是一个房地产自媒体运营专家。请根据用户提供的【模版】，将其中占位符（如 {项目名}, {总价}, {区域} 等）替换为选中房源的实际信息。
-        用户模版：${broadcastTemplate}
-        规则：
-        1. 严格遵守模版格式。
-        2. 如果有多个房源，请按模版格式重复生成。
-        3. 严禁使用 Markdown 符号。`;
+      if (broadcastTemplate.trim()) {
+        systemPrompt = `你是一个房地产文案专家。请严格按照用户提供的【自定义内容/模板】进行生成或格式化。
+        
+        文案基础/模板：
+        ${broadcastTemplate}
+        
+        要求：
+        1. 如果是模板，将占位符（如 {项目名}, {总价}, {区域}, {单价}, {卖点} 等）替换为实际房源信息。
+        2. 如果是参考文案，请参考其风格并带入房源信息。
+        3. 区域名去掉“区”或“新区”后缀（如：浦东新区 -> 浦东）。
+        4. 严禁使用任何 Markdown 符号（如 ** 或 #），保持纯文字+Emoji格式。`;
+      } else {
+        systemPrompt = `你是一个上海顶级房地产金牌顾问。请为选中的房源生成一段极具吸引力、非同质化的群发文案。
+        
+        核心准则：
+        1. 【绝对去同质化】：拒绝公式化开场词，每次生成的文案结构都要有所变化。
+        2. 【情感联结】：重点突出房源的“稀缺性”或“生活品质”，而不仅仅是罗列数据。
+        3. 【呼吸感排版】：大量使用 Emoji [🔥][🏠][💰][🌈][🚀][✨][💎][📍][👑][💯]，保持文案紧凑有质感。
+        4. 区域名简短化：必须去掉“区”或“新区”后缀。
+        5. 严禁任何 Markdown 格式（如 ** 或 #），保持移动端易读性。
+        6. 针对不同房源采用不同口吻（如：有的走专业分析，有的走紧急捡漏，有的走温馨居家）。`;
       }
 
       const response = await fetch(config.url, {
@@ -1022,7 +1094,13 @@ export default function App() {
             },
             {
               role: 'user',
-              content: `选中的房源数据：${JSON.stringify(selectedProps)}`
+              content: `房源数据：${JSON.stringify(selectedProps.map(p => ({
+                名称: p.name,
+                区域: p.area,
+                总价: p.totalPrice,
+                单价: p.unitPrice,
+                卖点: p.features
+              })))}`
             }
           ]
         })
@@ -1902,100 +1980,181 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex bg-slate-100 p-1.5 rounded-2xl">
-                  {[
-                    { id: 'auto', label: '自动生成' },
-                    { id: 'template', label: '套用模板' }
-                  ].map(mode => (
-                    <button 
-                      key={mode.id}
-                      onClick={() => setBroadcastMode(mode.id as any)}
-                      className={`px-6 py-2.5 rounded-xl text-xs font-black transition-all ${broadcastMode === mode.id ? 'bg-white shadow-lg text-slate-900 scale-105' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 px-6 py-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                  <Sparkles className={`w-4 h-4 ${t.primary}`} />
+                  <span className="text-sm font-black text-slate-400 uppercase tracking-widest text-[10px]">AI 智能群发增强模式</span>
                 </div>
               </div>
 
               <div className="grid md:grid-cols-2 gap-12 items-start">
                 <div className="space-y-8">
-                  {broadcastMode === 'template' ? (
-                    <div className="space-y-4">
-                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2">粘贴你的模版格式</label>
-                      <textarea 
-                        value={broadcastTemplate}
-                        onChange={e => setBroadcastTemplate(e.target.value)}
-                        placeholder="🔥清盘特价❗仅此一套❗\n🏠项目：{项目名}\n💰总价：{总价}\n...\nAI 将根据你的格式替换房源信息"
-                        className="w-full h-64 px-8 py-6 bg-slate-50 border-2 border-slate-200 rounded-[2rem] focus:outline-none focus:border-slate-800 transition-all text-slate-800 resize-none font-medium leading-relaxed"
-                      />
-                    </div>
-                  ) : (
-                    <div className="bg-slate-50/50 p-8 rounded-[2.5rem] border border-slate-100">
-                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 px-2 flex items-center justify-between">
-                        待发出的房源
-                        <span className="bg-slate-900 text-white px-2 py-0.5 rounded-md text-[10px]">{selectedPropIds.length}</span>
+                  {/* Property Summary (Top) */}
+                  <div className="bg-slate-50/50 p-8 rounded-[2.5rem] border border-slate-100">
+                    <div className="flex items-center justify-between mb-6 px-2">
+                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                         <Home className="w-4 h-4" />
+                         已选房源数据池
                       </h4>
-                      <div className="space-y-3 max-h-[300px] overflow-y-auto scrollbar-hide">
-                        {selectedPropIds.length === 0 ? (
-                          <div className="py-12 flex flex-col items-center justify-center text-center space-y-4 opacity-30">
-                             <Database className="w-10 h-10" />
-                             <p className="text-xs font-bold uppercase">在房源管理中 Shift+点击 勾选房源</p>
-                          </div>
-                        ) : (
-                          properties.filter(p => selectedPropIds.includes(p.id)).map(p => (
-                            <div key={p.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between group">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0">
-                                  {p.imageUrl ? <img src={p.imageUrl} className="w-full h-full object-cover" /> : <Plus className="w-4 h-4 m-auto text-slate-300" />}
-                                </div>
-                                <span className="font-bold text-slate-800 text-sm">{p.name}</span>
+                      <span className="bg-slate-900 text-white px-2.5 py-0.5 rounded-md text-[10px] font-black">{selectedPropIds.length}</span>
+                    </div>
+                    
+                    <div className="space-y-3 max-h-[180px] overflow-y-auto scrollbar-hide pr-2">
+                      {selectedPropIds.length === 0 ? (
+                        <div className="py-10 flex flex-col items-center justify-center text-center space-y-3 opacity-20">
+                           <Database className="w-10 h-10" />
+                           <p className="text-[10px] font-black uppercase tracking-widest">请在房源管理中勾选房源</p>
+                        </div>
+                      ) : (
+                        properties.filter(p => selectedPropIds.includes(p.id)).map(p => (
+                          <div key={p.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex items-center justify-between group transition-all hover:border-slate-200">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-300">
+                                {p.imageUrl ? (
+                                  <img src={p.imageUrl} alt="" className="w-full h-full object-cover rounded-xl" />
+                                ) : (
+                                  <Home className="w-5 h-5" />
+                                )}
                               </div>
+                              <div>
+                                <div className="font-black text-sm text-slate-800">{p.name}</div>
+                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{p.area.replace(/[区|新区]$/, '')} · {p.totalPrice}</div>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => setSelectedPropIds(prev => prev.filter(id => id !== p.id))}
+                              className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-rose-50 text-slate-200 hover:text-rose-400 transition-all"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between px-2">
+                        <label className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                          <ClipboardList className="w-4 h-4" />
+                          云端格式模板
+                        </label>
+                        <button 
+                          onClick={() => {
+                            setSelectedTemplateId(null);
+                            setBroadcastTemplate('');
+                            setNewTemplateName('');
+                          }}
+                          className={`${t.primary} text-[10px] font-black uppercase tracking-widest hover:underline`}
+                        >
+                          + 新建空白模板
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 max-h-[160px] overflow-y-auto pr-2 scrollbar-hide">
+                        {broadcastTemplates.length > 0 ? (
+                          broadcastTemplates.map(tpl => (
+                            <div 
+                              key={tpl.id}
+                              onClick={() => {
+                                setSelectedTemplateId(tpl.id);
+                                setBroadcastTemplate(tpl.content);
+                                setNewTemplateName(tpl.name);
+                              }}
+                              className={`p-4 rounded-[1.5rem] border-2 transition-all cursor-pointer relative group ${
+                                selectedTemplateId === tpl.id 
+                                  ? 'border-slate-900 bg-slate-900 text-white shadow-xl' 
+                                  : 'border-slate-100 bg-white text-slate-600 hover:border-slate-200 shadow-sm'
+                              }`}
+                            >
+                              <div className="font-black text-xs mb-1 truncate">{tpl.name}</div>
+                              <div className="text-[10px] opacity-40 truncate leading-tight h-4">{tpl.content}</div>
                               <button 
-                                onClick={() => togglePropSelection(p.id)}
-                                className="p-2 text-rose-300 hover:bg-rose-50 rounded-lg"
+                                onClick={(e) => deleteTemplate(tpl.id, e)}
+                                className="absolute top-2 right-2 p-1.5 bg-rose-50 text-rose-400 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
                               >
-                                <Plus className="w-4 h-4 rotate-45" />
+                                <Trash2 className="w-3 h-3" />
                               </button>
                             </div>
                           ))
+                        ) : (
+                          <div className="col-span-2 py-8 border-2 border-dashed border-slate-100 rounded-[2rem] flex flex-col items-center justify-center opacity-40">
+                             <span className="text-[10px] font-bold">暂无保存模板</span>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  )}
+
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between px-2">
+                          <label className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                            {selectedTemplateId ? '当前模板属性' : 'AI 自由发挥 / 参考内容'}
+                          </label>
+                          <div className="flex gap-2">
+                            <input 
+                              type="text"
+                              value={newTemplateName}
+                              onChange={e => setNewTemplateName(e.target.value)}
+                              placeholder="模板名称"
+                              className="w-24 px-3 py-1.5 text-[10px] border border-slate-200 rounded-xl focus:outline-none focus:border-slate-400 transition-all font-bold"
+                            />
+                            <button 
+                              onClick={saveTemplate} 
+                              disabled={isSavingTemplate || !broadcastTemplate.trim()}
+                              className="bg-slate-900 text-white px-4 py-1.5 rounded-xl text-[10px] font-black hover:bg-slate-800 transition-all disabled:opacity-20 flex items-center gap-1.5"
+                            >
+                              {isSavingTemplate && <Loader2 className="w-3 h-3 animate-spin" />}
+                              {selectedTemplateId ? '更新' : '保存'}
+                            </button>
+                          </div>
+                        </div>
+                        <textarea 
+                          value={broadcastTemplate}
+                          onChange={e => setBroadcastTemplate(e.target.value)}
+                          placeholder="选择上方模板，或在此输入文案参考（使用 {项目名} 等占位符），留空则由 AI 自动生成..."
+                          className="w-full h-40 px-6 py-5 bg-slate-50 border-2 border-slate-200 rounded-[2rem] focus:outline-none focus:border-slate-800 transition-all text-sm text-slate-800 font-medium leading-relaxed resize-none"
+                        />
+                        {!broadcastTemplate.trim() && (
+                           <p className="text-[10px] text-slate-300 font-bold px-2 uppercase tracking-widest animate-pulse">✨ 当前模式：AI 灵感随机生成</p>
+                        )}
+                      </div>
+                  </div>
 
                   <button 
                     onClick={aiBroadcast}
                     disabled={isBroadcasting || selectedPropIds.length === 0}
-                    className={`w-full py-6 ${t.secondary} text-white rounded-3xl font-black text-xl shadow-2xl flex items-center justify-center gap-4 transition-all disabled:bg-slate-200 active:scale-95`}
+                    className={`w-full py-6 ${t.secondary} text-white rounded-[2rem] font-black text-xl shadow-2xl flex items-center justify-center gap-4 transition-all hover:scale-[1.02] active:scale-95 disabled:bg-slate-100 disabled:text-slate-300 disabled:scale-100`}
                   >
                     {isBroadcasting ? <Loader2 className="w-7 h-7 animate-spin" /> : <Sparkles className="w-6 h-6" />}
-                    {isBroadcasting ? '正在生成...' : '立即生成群发内容'}
+                    {isBroadcasting ? '正在编织文案...' : '生成独属群发内容'}
                   </button>
                 </div>
 
                 <div className="space-y-6">
-                  <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-xl min-h-[500px] relative overflow-hidden group">
+                  <div className="bg-white rounded-[3.5rem] p-10 border border-slate-100 shadow-xl min-h-[500px] relative overflow-hidden group">
                      {!broadcastResult && (
                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-12 opacity-10 pointer-events-none group-hover:scale-110 transition-transform">
-                          <ClipboardList className="w-32 h-32 mb-6" />
-                          <p className="text-sm font-bold uppercase tracking-[0.2em]">文案生成预览区</p>
+                          <div className="w-32 h-32 bg-slate-50 rounded-[3rem] mb-8 flex items-center justify-center">
+                            <Send className="w-16 h-16" />
+                          </div>
+                          <p className="text-sm font-black uppercase tracking-[0.4em]">文案生成预览</p>
+                          <p className="text-[10px] mt-4 opacity-50">GENERATION PREVIEW</p>
                        </div>
                      )}
-                     <div className="relative z-10 whitespace-pre-wrap text-slate-800 leading-relaxed font-bold text-lg">
+                     <div className="relative z-10 whitespace-pre-wrap text-slate-800 leading-relaxed font-bold text-lg p-4">
                        {broadcastResult}
                      </div>
                      {broadcastResult && (
-                        <button 
-                          onClick={() => {
-                            navigator.clipboard.writeText(broadcastResult);
-                            alert('已复制到剪贴板！');
-                          }}
-                          className="absolute bottom-10 right-10 p-5 bg-slate-900 text-white rounded-2xl shadow-2xl hover:scale-110 active:scale-95 transition-all flex items-center gap-3"
-                        >
-                          <Send className="w-5 h-5" />
-                          <span className="text-xs font-black uppercase tracking-widest">复制全文</span>
-                        </button>
+                        <div className="absolute bottom-10 right-10 flex gap-3">
+                           <button 
+                            onClick={() => {
+                              navigator.clipboard.writeText(broadcastResult);
+                              alert('已复制到剪贴板！');
+                            }}
+                            className="p-5 bg-slate-900 text-white rounded-3xl shadow-2xl hover:scale-110 active:scale-95 transition-all flex items-center gap-3 border-4 border-white"
+                          >
+                            <Send className="w-5 h-5" />
+                            <span className="text-xs font-black uppercase tracking-widest">复制全文</span>
+                          </button>
+                        </div>
                      )}
                   </div>
                 </div>
