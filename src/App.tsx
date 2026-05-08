@@ -26,7 +26,11 @@ import {
   X,
   RefreshCw,
   Trash,
-  Video
+  Video,
+  TrainFront,
+  Image as ImageIcon,
+  Type as TypeIcon,
+  ChevronUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Cropper, { Point, Area } from 'react-easy-crop';
@@ -99,6 +103,7 @@ interface Property {
   propertyFee?: string; // 物业费
   parking?: string;    // 停车位
   elevatorRatio?: string; // 梯户比
+  transport?: string;   // 交通情况
   projectBrief?: string; // 项目资料
   projectImages?: string[]; // 项目资料图片
   videoUrl?: string; // 房源视频
@@ -129,6 +134,7 @@ interface ExtractionResult {
   附近配套?: string;
   在售楼层?: string;
   在售面积?: string;
+  交通?: string;
   项目资料?: string;
 }
 
@@ -339,20 +345,29 @@ export default function App() {
 
   const downloadProjectBrief = (prop: Property) => {
     // Generate a rich HTML visual brief focusing ONLY on the Project Brief section
-    const imagesHtml = (prop.projectImages || []).map(img => `
+    const transportHtml = prop.transport ? `
+      <div style="margin-bottom: 30px; background: #eff6ff; padding: 25px; border-radius: 20px; border: 1px solid #dbeafe;">
+        <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #1d4ed8; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 800;">交通出行情况</h3>
+        <p style="margin: 0; color: #1e40af; font-weight: 600; line-height: 1.6;">${prop.transport}</p>
+      </div>
+    ` : '';
+
+    const blocksHtml = (prop.briefBlocks || []).map(block => {
+      if (block.type === 'text') {
+        return `<div style="margin-bottom: 25px; font-size: 16px; color: #334155; white-space: pre-wrap; line-height: 1.8;">${block.content}</div>`;
+      } else if (block.type === 'image') {
+        return `<div style="margin-bottom: 25px;"><img src="${block.content}" style="width: 100%; border-radius: 16px; display: block; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);" /></div>`;
+      } else if (block.type === 'video') {
+        return `<div style="margin-bottom: 25px; background: #000; border-radius: 16px; overflow: hidden;"><video src="${block.content}" controls style="width: 100%; display: block;"></video></div>`;
+      }
+      return '';
+    }).join('');
+
+    const legacyImagesHtml = (prop.projectImages || []).map(img => `
       <div style="break-inside: avoid; margin-bottom: 20px;">
         <img src="${img}" style="width: 100%; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);" />
       </div>
     `).join('');
-
-    const videoHtml = prop.videoUrl ? `
-      <div style="margin-bottom: 30px;">
-        <h2 style="font-size: 16px; font-weight: 800; color: #64748b; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-          <span>房源视频资料</span>
-        </h2>
-        <video src="${prop.videoUrl}" controls style="width: 100%; border-radius: 16px; background: #000; display: block;"></video>
-      </div>
-    ` : '';
 
     const htmlContent = `
 <!DOCTYPE html>
@@ -362,32 +377,28 @@ export default function App() {
   <title>${prop.name} - 项目资料</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.6; padding: 40px 20px; }
-    .container { max-width: 700px; margin: 0 auto; background: white; border-radius: 32px; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.12); overflow: hidden; }
-    .header { background: #0f172a; color: white; padding: 40px; }
-    .header h1 { margin: 0; font-size: 28px; font-weight: 900; letter-spacing: -0.025em; }
-    .header p { margin: 8px 0 0; opacity: 0.6; font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+    .container { max-width: 750px; margin: 0 auto; background: white; border-radius: 40px; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.12); overflow: hidden; }
+    .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: white; padding: 50px 40px; }
+    .header h1 { margin: 0; font-size: 32px; font-weight: 900; letter-spacing: -0.025em; }
+    .header p { margin: 10px 0 0; opacity: 0.6; font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
     .content { padding: 40px; }
-    .text-block { font-size: 16px; color: #334155; white-space: pre-wrap; margin-bottom: 30px; word-break: break-word; }
-    .images-grid { column-count: 2; column-gap: 20px; }
-    @media (max-width: 640px) { .images-grid { column-count: 1; } }
-    .footer { margin-top: 60px; text-align: center; font-size: 12px; color: #94a3b8; padding-top: 30px; border-top: 1px solid #f1f5f9; }
+    .footer { margin-top: 60px; text-align: center; font-size: 13px; color: #94a3b8; padding: 40px; border-top: 1px solid #f1f5f9; background: #fcfcfd; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
       <h1>${prop.name}</h1>
-      <p>Project Detailed Materials</p>
+      <p>Project Presentation & Dossier</p>
     </div>
     <div class="content">
-      ${videoHtml}
-      <div class="text-block">${prop.projectBrief || '暂无详细文字介绍'}</div>
-      <div class="images-grid">
-        ${imagesHtml}
-      </div>
-      <div class="footer">
-        文档生成于：${new Date().toLocaleString()} | 上海房地产智能管理系统
-      </div>
+      ${transportHtml}
+      ${blocksHtml}
+      ${legacyImagesHtml}
+      ${prop.videoUrl ? `<video src="${prop.videoUrl}" controls style="width: 100%; border-radius: 16px; background: #000; margin-bottom: 30px;"></video>` : ''}
+    </div>
+    <div class="footer">
+      文档生成于：${new Date().toLocaleString()} | 上海房地产智能管理系统
     </div>
   </div>
 </body>
@@ -503,6 +514,61 @@ export default function App() {
     return String(val);
   };
 
+  const addBlock = (type: 'text' | 'image' | 'video') => {
+    if (!editingProp) return;
+    const newBlock: BriefBlock = {
+      id: Math.random().toString(36).substr(2, 9),
+      type,
+      content: ''
+    };
+    const blocks = [...(editingProp.briefBlocks || []), newBlock];
+    setEditingProp({ ...editingProp, briefBlocks: blocks });
+  };
+
+  const updateBlock = (id: string, content: string) => {
+    if (!editingProp) return;
+    const blocks = (editingProp.briefBlocks || []).map(b => 
+      b.id === id ? { ...b, content } : b
+    );
+    setEditingProp({ ...editingProp, briefBlocks: blocks });
+  };
+
+  const removeBlock = (id: string) => {
+    if (!editingProp) return;
+    const blocks = (editingProp.briefBlocks || []).filter(b => b.id !== id);
+    setEditingProp({ ...editingProp, briefBlocks: blocks });
+  };
+
+  const moveBlock = (id: string, direction: 'up' | 'down') => {
+    if (!editingProp || !editingProp.briefBlocks) return;
+    const idx = editingProp.briefBlocks.findIndex(b => b.id === id);
+    if (idx < 0) return;
+    const newBlocks = [...editingProp.briefBlocks];
+    if (direction === 'up' && idx > 0) {
+      [newBlocks[idx-1], newBlocks[idx]] = [newBlocks[idx], newBlocks[idx-1]];
+    } else if (direction === 'down' && idx < newBlocks.length - 1) {
+      [newBlocks[idx], newBlocks[idx+1]] = [newBlocks[idx+1], newBlocks[idx]];
+    }
+    setEditingProp({ ...editingProp, briefBlocks: newBlocks });
+  };
+
+  const handleBlockImageUpload = async (e: ChangeEvent<HTMLInputElement>, blockId: string) => {
+    const files = e.target.files;
+    if (!files || !files[0]) return;
+    const file = files[0];
+    if (file.size > 8 * 1024 * 1024) {
+      setError('图片大小不能超过 8MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        updateBlock(blockId, event.target.result as string);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const aiExtract = async () => {
     if (!extractText.trim() && extractImages.length === 0) return;
     setIsExtracting(true);
@@ -533,7 +599,7 @@ export default function App() {
           messages: [
             { 
               role: 'system', 
-              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、首付、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、核心卖点、附近配套、在售楼层、在售面积。请务必同时提取总价和均价信息。注意：不要尝试提取项目详细介绍或图片汇总描述到项目资料中。' 
+              content: '你是一个上海房地产智能分析专家。你的任务是从用户提供的文字或【多张图片】中提取常规房源信息。严禁输出任何解释性文字，必须仅输出纯 JSON 格式。字段包含：项目名、区域、地址、总价（指该项目的起步总价或范围，如 100万起）、均价（指单价，如 50000/平）、总价数值（用于排序的数字）、首付、面积与户型、水电煤、是否通煤气（布尔值）、物业费、停车位、梯户比、核心卖点、附近配套、在售楼层、在售面积。请务必同时提取交通情况（离每个地铁站多远，只要地铁站，地铁不方便的加公交站，如果资料里没有写地铁站就自动搜索或整理你已知的地理信息来确认距离）。最后，将所有其他零散的卖点或补充说明总结到“项目资料”字段中。' 
             },
             { role: 'user', content: userContent }
           ],
@@ -574,8 +640,10 @@ export default function App() {
         nearbyFacilities: ensureString(extracted.附近配套),
         saleFloor: ensureString(extracted.在售楼层),
         saleArea: ensureString(extracted.在售面积),
-        projectBrief: '',
+        transport: ensureString(extracted.交通),
+        projectBrief: ensureString(extracted.项目资料),
         projectImages: [],
+        briefBlocks: extracted.项目资料 ? [{ id: Math.random().toString(36).substr(2, 9), type: 'text', content: ensureString(extracted.项目资料) }] : [],
         createdAt: Date.now(),
         userId: auth.currentUser?.uid || 'anonymous'
       };
@@ -1700,6 +1768,7 @@ export default function App() {
                             <div className="flex gap-1 items-center">
                               {prop.videoUrl && <Video className="w-3 h-3 text-rose-500 animate-pulse" />}
                               {(prop.projectImages?.length || 0) > 0 && <Camera className="w-3 h-3 text-slate-300" />}
+                              {prop.transport && <TrainFront className="w-3 h-3 text-blue-400" />}
                             </div>
                             <button 
                               onClick={(e) => { e.stopPropagation(); downloadProjectBrief(prop); }}
@@ -2237,7 +2306,7 @@ export default function App() {
                     <motion.button 
                       whileTap={{ scale: 0.98 }}
                       whileHover={{ backgroundColor: '#eff6ff' }}
-                      onClick={() => downloadProjectData(editingProp)}
+                      onClick={() => downloadProjectBrief(editingProp)}
                       className="px-8 py-5 bg-blue-50 text-blue-500 rounded-[2rem] font-black text-lg transition-all border border-blue-100 flex items-center justify-center gap-2"
                     >
                       <Download className="w-5 h-5" />
