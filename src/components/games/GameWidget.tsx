@@ -14,9 +14,11 @@ const GameWidget: React.FC = () => {
   const [activeGame, setActiveGame] = useState<'2048' | 'sudoku' | 'mines' | 'snake' | 'memory' | 'story'>('story');
   const constraintsRef = useRef(null);
   const clickCount = useRef(0);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<any>(null);
 
-  const handleTriggerClick = () => {
+  const handleTriggerClick = (e: React.MouseEvent) => {
+    // Prevent accidental clicks on elements behind
+    e.stopPropagation();
     clickCount.current += 1;
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     
@@ -33,10 +35,10 @@ const GameWidget: React.FC = () => {
 
   return (
     <>
-      {/* Hidden trigger area in the bottom-right corner */}
+      {/* Hidden trigger area in the bottom-right corner - enlarged to a larger region */}
       <div 
         onClick={handleTriggerClick}
-        className="fixed bottom-0 right-0 w-8 h-8 z-[10000] cursor-default pointer-events-auto"
+        className="fixed bottom-0 right-0 w-32 h-32 z-[10000] cursor-default pointer-events-auto transition-colors"
         title=" "
       />
 
@@ -57,7 +59,7 @@ const GameWidget: React.FC = () => {
                   animate={{ opacity: 0.4, x: 15 }}
                   whileHover={{ opacity: 1, x: 0 }}
                   onClick={() => setIsOpen(true)}
-                  className="w-12 h-10 rounded-l-2xl bg-white/40 backdrop-blur-md flex items-center justify-start pl-3 text-slate-600 shadow-sm border border-white/20 overflow-hidden group border-r-0"
+                  className="w-12 h-10 rounded-l-2xl bg-white/40 backdrop-blur-md flex items-center justify-start pl-3 text-slate-600 border border-white/20 overflow-hidden group border-r-0"
                   title="Relax..."
                 >
                   <Gamepad2 size={24} className="transition-transform group-hover:rotate-12" />
@@ -71,7 +73,7 @@ const GameWidget: React.FC = () => {
                   initial={{ opacity: 0, scale: 0.9, x: -10 }}
                   animate={{ opacity: 1, scale: 1, x: -20 }}
                   exit={{ opacity: 0, scale: 0.9, x: -10 }}
-                  className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20 overflow-hidden w-[280px] sm:w-[320px] p-1 absolute bottom-0 right-0 origin-bottom-right"
+                  className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-lg border border-slate-200/50 overflow-hidden w-[280px] sm:w-[320px] p-1 absolute bottom-0 right-0 origin-bottom-right"
                 >
                   {/* Header */}
                   <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/30 rounded-t-xl">

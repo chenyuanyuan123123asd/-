@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, 
@@ -36,9 +36,22 @@ const StoryAdventure: React.FC = () => {
   const [theme, setTheme] = useState<'fantasy' | 'sci-fi' | 'noir' | 'horror'>('fantasy');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const ai = useMemo(() => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) return null;
+      return new GoogleGenAI({ apiKey });
+    } catch (e) {
+      console.warn('API Key access failed:', e);
+      return null;
+    }
+  }, []);
 
   const startGame = async (selectedTheme?: typeof theme) => {
+    if (!ai) {
+      setError('系统配置错误：缺少 API 密钥');
+      return;
+    }
     setIsLoading(true);
     setError(null);
     const targetTheme = selectedTheme || theme;
@@ -85,7 +98,7 @@ const StoryAdventure: React.FC = () => {
   };
 
   const handleAction = async (actionText: string) => {
-    if (!gameState || isLoading) return;
+    if (!gameState || isLoading || !ai) return;
     setIsLoading(true);
     setError(null);
 
@@ -175,7 +188,7 @@ const StoryAdventure: React.FC = () => {
   const isDead = gameState && (gameState.attributes.health <= 0 || gameState.attributes.sanity <= 0);
 
   return (
-    <div className="flex flex-col h-[500px] max-w-full bg-white rounded-lg overflow-hidden border border-slate-200 shadow-sm font-sans">
+    <div className="flex flex-col h-[500px] max-w-full bg-white rounded-lg overflow-hidden border border-slate-200 font-sans">
       {/* HUD Header - Minimalist */}
       <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-4 text-[9px] font-bold text-slate-400 uppercase tracking-tighter">
