@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Cropper, { Point, Area } from 'react-easy-crop';
+import GameWidget from './components/games/GameWidget';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { 
@@ -105,6 +106,10 @@ interface Property {
   elevatorRatio?: string; // 梯户比
   transport?: string;   // 交通情况
   projectBrief?: string; // 项目资料
+  remarks?: string; // 内部私密备注(优缺点)
+  commercialType?: 'scattered' | 'whole_floor' | 'whole_building'; // 商住类型：散套/整层/整栋
+  landYear?: string; // 拿地年份
+  buildingYear?: string; // 竣工年份
   projectImages?: string[]; // 项目资料图片
   videoUrl?: string; // 房源视频
   briefBlocks?: BriefBlock[]; // 新版：图文视频穿插资料
@@ -254,7 +259,7 @@ export default function App() {
   const filteredProperties = useMemo(() => {
     return properties.filter(p => {
       if (filterArea === '全部') return true;
-      const normalizedArea = p.area.replace(/区$/, '').replace(/新区$/, '');
+      const normalizedArea = (p.area || '').replace(/新区$/, '').replace(/区$/, '');
       return normalizedArea === filterArea;
     });
   }, [properties, filterArea]);
@@ -357,6 +362,7 @@ export default function App() {
               return {
                 id: doc.id,
                 ...data,
+                area: data.area || '', // Ensure area is always a string
                 createdAt: data.createdAt?.toMillis?.() || data.createdAt || 0
               } as Property;
             })
@@ -387,6 +393,7 @@ export default function App() {
           setError(`模板同步失败: ${err.message}`);
         });
 
+        // CRITICAL: Cleanup nested subscriptions when the auth listener triggers again or unmounts
         return () => {
           unsubProps();
           unsubBroad();
@@ -760,7 +767,7 @@ export default function App() {
       const avgP = ensureString(extracted.均价);
       
       const propData = {
-        name: ensureString(extracted.项目名) || '未命名房源',
+        name: ensureString(extracted.项目名) || "未命名房源",
         area: ensureString(extracted.区域),
         address: ensureString(extracted.地址),
         totalPrice: totalP,
@@ -779,20 +786,20 @@ export default function App() {
         saleArea: ensureString(extracted.在售面积),
         projectBrief: ensureString(extracted.项目资料),
         projectImages: [],
-        briefBlocks: extracted.项目资料 ? [{ id: Math.random().toString(36).substr(2, 9), type: 'text', content: ensureString(extracted.项目资料) }] : [],
+        briefBlocks: extracted.项目资料 ? [{ id: Math.random().toString(36).substr(2, 9), type: "text", content: ensureString(extracted.项目资料) }] : [],
         createdAt: serverTimestamp(),
         userId: auth.currentUser?.uid
       };
 
-      if (!propData.userId) throw new Error('用户未登录，无法保存房源');
+      if (!propData.userId) throw new Error("用户未登录，无法保存房源");
 
-      await addDoc(collection(db, 'properties'), propData);
+      await addDoc(collection(db, "properties"), propData);
 
-      setExtractText('');
+      setExtractText("");
       setExtractImages([]);
-      setActiveTab('database');
+      setActiveTab("database");
     } catch (err: any) {
-      const error = handleFirestoreError(err, OperationType.WRITE, 'properties');
+      handleFirestoreError(err, OperationType.WRITE, "properties");
       setError(`AI 解析失败: ${err.message}`);
     } finally {
       setIsExtracting(false);
@@ -803,13 +810,12 @@ export default function App() {
     if (!matchRequest.trim() || properties.length === 0) return;
     setIsMatching(true);
     setError(null);
-
     try {
+
       const modePrompt = matchMode === 'concise' 
         ? '请输出精简的项目对比方案（1.项目A：卖点；2.项目B：卖点...），字数控制在250字以内，禁止使用Markdown符号。'
         : '请生成一份专业的电销推荐话术，包含开场白、核心优势分析及邀约建议，禁止使用Markdown符号。';
 
-      // Map properties to a slightly more focused object to handle context window better while ensuring key info is included
       const propertyContext = properties.map(p => ({
         项目: p.name,
         区域: p.area,
@@ -820,25 +826,41 @@ export default function App() {
         在售面积: p.saleArea,
         核心卖点: p.sellingPoints,
         周边配套: p.nearbyFacilities,
-        项目资料: p.projectBrief // Now including the detailed brief for AI to read
+        项目资料: p.projectBrief,
+        内部备注: p.remarks 
       }));
 
-      const systemPrompt = `你是一个专业的房地产金牌顾问。请根据房源库提供匹配方案。
+      const systemPrompt = `你是一个拥有10年经验、带看成交量全城第一的【顶级金牌房地产销冠】。
+      
+      你的沟通风格：
+      1. 【金牌顾问风范】：谈吐专业、自信且沉稳。你不仅懂房子，还博古通今，比如能适度聊聊风水（如“明堂开阔”、“藏风聚气”等意头）、区域规划、金融信贷甚至本地生活趣闻。
+      2. 【循序渐进】：不要刚一上来就狂轰乱炸式推销。先介绍最核心的配套和房源硬实力，如果能聊开，再根据房子特点发散深度内容。
+      3. 【邀约导向】：你的终极目标是把客户【约出来带看】！网上的咨询只是铺垫，要通过引导“只有实地才能体验的采光/质感”等钩子，暗示好房源稍纵即逝，促使客户到场。
+      4. 【逼单艺术】：逼单要隐秘而坚定（软硬兼施），不要咄咄逼人，而是以“为客户利益着想”的姿态（如：下周排队人可能更多、这套位置是最后一两套等）。
       
       核心准则：
       1. 优先在用户指定的区域中寻找匹配房源。
       2. 如果指定区域内没有完美契合的项目，你【必须】跳出区域限制，在全上海范围内寻找更契合用户核心需求（如单价、总价、燃气、通勤）的替代方案。
-      3. 在推荐跨区房源时，必须给出令人信服的理由。不要简单说“价格便宜”，要从客户角度出发，比如：虽然不在您最初选择的区，但该项目就在地铁口，直达您关注的商圈，通勤效率甚至更高；或者该项目的品质和周边配套远超同价位区域项目。
-      4. 你的目标是为客户提供最优解，而不仅仅是刻板地执行筛选条件。要有温度、人性化，真正为客户着想。
+      3. 在推荐跨区房源时，给出高情商理由。
+      
+      【关键指令 - 内部备注处理】：
+      房源数据中包含【内部备注】，这是只能你看、绝不能原话告诉客户的“私密情报”（如：某项目户型有点怪、采光有遮挡等）。
+      - 如果备注是【缺点】：请你尽量少推或者在推荐时有技巧地避开，或者给出化解建议。
+      - 如果备注是【亮点】：作为你的杀手锏展示。
+      
+      【专业须知 - 商改住】：
+      我们目前主要销售的是市区“商改住”项目（旧办公楼改造）：
+      - 2016年前拿的地，地标位置绝版。
+      - 建筑年份多在2000年左右。
+      - 散套：同楼层有办公，价格优势大。
+      - 整层：整层全改造为公寓，环境统一。
+      - 整栋：整栋无办公，纯居住公寓。
       
       具体要求：
       1. 请仔细分析房源基本信息，挖掘【项目资料】中的细节。
       2. 一次筛选 1-3 个最符合的项目。
-      3. 严禁使用 **、###、-、* 等 Markdown 符号。
-      4. 结构清爽，使用纯换行组织。
-      5. 当前回复模式：${modePrompt}
-      
-      房源库数据（请基于此进行深度推荐）：${JSON.stringify(propertyContext)}`;
+      3. 严禁使用 **、###、-、* 等 Markdown 符号，保持纯文本换行。
+      4. 当前回复模式：${modePrompt}`;
 
       const currentMessages: MatchMessage[] = isContinue 
         ? [...matchHistory, { role: 'user', content: matchRequest }]
@@ -894,7 +916,7 @@ export default function App() {
           img.src = event.target?.result as string;
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 1280; // Slightly larger for better OCR
+            const MAX_WIDTH = 1280; 
             const MAX_HEIGHT = 1280;
             let width = img.width;
             let height = img.height;
@@ -913,30 +935,26 @@ export default function App() {
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.imageSmoothingEnabled = true;
-              ctx.imageSmoothingQuality = 'high';
-              ctx.drawImage(img, 0, 0, width, height);
-            }
-            // Use 0.75 for a good balance of size and quality
-            resolve(canvas.toDataURL('image/jpeg', 0.75));
+            ctx?.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.6));
           };
-          img.onerror = () => reject(new Error('图片加载失败'));
+          img.onerror = reject;
         };
-        reader.onerror = () => reject(new Error('读取失败'));
+        reader.onerror = reject;
         reader.readAsDataURL(file);
       });
     };
 
-    const processes = files.map((file: File) => processImage(file));
+    const processes = files.map(file => processImage(file));
 
     Promise.all(processes)
       .then(newImages => {
         setExtractImages(prev => [...prev, ...newImages]);
       })
       .catch(err => {
-        setError(err.message);
+        setError(`图片处理失败: ${err.message}`);
       });
+    e.target.value = '';
   };
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>, field: 'imageUrl' | 'videoUrl') => {
@@ -952,16 +970,16 @@ export default function App() {
     reader.onload = async (event) => {
       const dataUrl = event.target?.result as string;
       if (field === 'imageUrl') {
-        const compressedUrl = await compressImage(dataUrl, 400, 300); // Main image doesn't need to be huge
-        setAspect(4/3); // Housing photo aspect ratio
+        const compressedUrl = await compressImage(dataUrl, 400, 300);
+        setAspect(4/3);
         setCropImage(compressedUrl);
         setOnCropDone(() => async (croppedUrl: string) => {
           const finalUrl = await compressImage(croppedUrl, 400, 300);
-          setEditingProp({ ...editingProp, [field]: finalUrl });
+          setEditingProp({ ...editingProp, [field]: finalUrl as any });
           setCropImage(null);
         });
       } else {
-        setEditingProp({ ...editingProp, [field]: dataUrl });
+        setEditingProp({ ...editingProp, [field]: dataUrl as any });
       }
     };
     reader.readAsDataURL(file);
@@ -989,7 +1007,7 @@ export default function App() {
       });
     };
     reader.readAsDataURL(file);
-    e.target.value = ''; // Reset for same file
+    e.target.value = ''; 
   };
 
   const createImage = (url: string): Promise<HTMLImageElement> =>
@@ -1004,13 +1022,12 @@ export default function App() {
   const getCroppedImg = async (imageSrc: string, pixelCrop: Area): Promise<string> => {
     const image = await createImage(imageSrc);
     const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) return '';
-
     canvas.width = pixelCrop.width;
     canvas.height = pixelCrop.height;
-
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) return '';
+    
     ctx.drawImage(
       image,
       pixelCrop.x,
@@ -1027,19 +1044,24 @@ export default function App() {
   };
 
   const handleApplyCrop = async () => {
-    if (cropImage && croppedAreaPixels) {
+    if (croppedAreaPixels && cropImage && onCropDone) {
       try {
-        const croppedImage = await getCroppedImg(cropImage, croppedAreaPixels);
-        onCropDone(croppedImage);
+        const croppedUrl = await getCroppedImg(cropImage, croppedAreaPixels);
+        onCropDone(croppedUrl);
+        setCropImage(null);
       } catch (e) {
-        console.error(e);
+        setError('图片剪裁失败');
       }
     }
   };
 
-  const compressImage = async (dataUrl: string, maxWidth = 600, maxHeight = 600): Promise<string> => {
-    return new Promise(async (resolve) => {
-      const img = await createImage(dataUrl);
+  const calculateTotalSize = (images: string[]) => {
+    return images.reduce((sum, img) => sum + img.length, 0);
+  };
+
+  const compressImage = async (dataUrl: string, maxWidth = 1200, maxHeight = 1200): Promise<string> => {
+    const img = await createImage(dataUrl);
+    return new Promise((resolve) => {
       let width = img.width;
       let height = img.height;
 
@@ -1060,13 +1082,8 @@ export default function App() {
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx?.drawImage(img, 0, 0, width, height);
-      // More aggressive compression for many images
-      resolve(canvas.toDataURL('image/jpeg', 0.5));
+      resolve(canvas.toDataURL('image/jpeg', 0.6));
     });
-  };
-
-  const calculateTotalSize = (images: string[]) => {
-    return images.reduce((sum, img) => sum + img.length, 0);
   };
 
   const handleProjectImagesUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -1081,7 +1098,7 @@ export default function App() {
 
     const readers = files.map((file: File) => {
       return new Promise<string>((resolve, reject) => {
-        if (file.size > 8 * 1024 * 1024) { // Allow slightly larger original upload before compression
+        if (file.size > 8 * 1024 * 1024) {
           reject(new Error(`${file.name} 超过 8MB`));
           return;
         }
@@ -1101,7 +1118,6 @@ export default function App() {
         const nextImages = [...currentImages, ...compressedImages];
         const totalSize = calculateTotalSize(nextImages);
         
-        // Firestore limit is ~1MB. We should stay well below it for safety.
         if (totalSize > 800 * 1024) {
           setError('房源总附件大小已接近云端存储限制，请分批或使用更小的图片');
           return;
@@ -1130,24 +1146,30 @@ export default function App() {
       
       let systemPrompt = '';
       if (broadcastTemplate.trim()) {
-        systemPrompt = `你是一个房地产文案专家。请直接基于用户提供的【文案基础/模板】进行生成。
+        systemPrompt = `你是一个拥有销冠思维的房地产文案专家。请直接基于用户提供的【文案基础/模板】进行生成。
+        
+        【性格设定】：
+        你是个谈笑间就能成交的老练经纪人。言语中透着专业、懂行，不仅聊地段，还懂生活品质和一点玄学/风水。
         
         【核心指令】：
-        1. 【字数/风格对齐】：必须保持与模板相近的字数和语气。长模版则详尽，短模版则精炼。严禁将短模板扩充为长篇大论。
-        2. 【无痕事实核查】：如果房源数据与模板/常识冲突（如不通燃气、非住宅水电等），请将这些信息【自然融入】文案中，不要以“温馨提示”等说教口吻列出。
-           - 示例：如果是公寓且不通燃气，文案应写为“都会精致空间，虽无明火燃气，但享极速商用配套”等，而非生硬提醒。
-        3. 【变量替换】：占位符（如 {项目名}, {总价} 等）必须替换。区域名去掉“区”或“新区”后缀。
-        4. 【格式限制】：保持纯文字+Emoji，严禁使用任何 Markdown 符号（如 ** 或 #）。`;
+        1. 【绝对长度对齐】：严格遵守模板长度！如果用户选的是短模板，你的输出【必须】极其精简（50-100字内）。严禁废话，严禁扩写！
+        2. 【无痕事实核查】：严禁编造。若数据与常识不符（如不通燃气），请自然融入优势化解，而非直白报错。
+        3. 【内部备注运用】：参考房源的【内部备注】，避开客户忌讳的缺点，放大卖点。但注意备注内容仅供你参考，不可直白说出。
+        4. 【变量替换】：占位符必须替换。区域名简短化（去“区”）。
+        5. 【格式限制】：纯文字+Emoji，严禁使用任何 Markdown 符号（如 ** 或 #）。`;
       } else {
-        systemPrompt = `你是一个上海顶级房地产金牌顾问。请为选中的房源生成一段极具吸引力、非同质化的群发文案。
+        systemPrompt = `你是一个上海成交金额过亿的【金牌顶级房地产销冠】。请为选中的房源生成一段极具杀伤力的、足以让客户立刻回电的群发文案。
+        
+        【销冠特质】：
+        - 专业博学：除了房子，你还随口能聊几句区域背山面水（风水）、板块潜力和资产配置。
+        - 循序渐进：文案要有画面感，勾引客户实地带看的欲望。
+        - 极简主义：字数要精炼，不讲废话。
         
         【核心准则】：
-        1. 【事实第一】：严禁编造房源信息。必须仔细检查房源的燃气、水电、梯户比等技术指标。
-        2. 【绝对去同质化】：拒绝公式化开场词，每次生成的文案结构都要有所变化。
-        3. 【情感联结】：重点突出房源的“稀缺性”或“生活品质”，而不仅仅是罗列数据。
-        4. 【呼吸感排版】：大量使用 Emoji，保持文案紧凑有质感。
-        5. 区域名简短化：必须去掉“区”或“新区”后缀。
-        6. 严禁任何 Markdown 格式，保持移动端易读性。`;
+        1. 【事实第一】：仔细核查燃气、水电、梯户比等。
+        2. 【内部备注避坑】：参考房源备注，不要推备注中提到有明显暗伤的房子，除非该暗伤能被性价比抹平。
+        3. 【排版呼吸感】：多用 Emoji。
+        4. 区域名去后缀。严禁 Markdown。`;
       }
 
       const response = await fetch(config.url, {
@@ -1165,7 +1187,7 @@ export default function App() {
             },
             {
               role: 'user',
-              content: `【参考模板/风格内容】：\n${broadcastTemplate}\n\n【房源真实数据】：\n${JSON.stringify(selectedProps.map(p => ({
+              content: `【参考模板/风格内容】：\n${broadcastTemplate}\n\n【房源真实数据/参考备注】：\n${JSON.stringify(selectedProps.map(p => ({
                 名称: p.name,
                 区域: p.area,
                 总价: p.totalPrice,
@@ -1174,7 +1196,11 @@ export default function App() {
                 面积: p.saleArea,
                 燃气: p.hasGas === true ? '通燃气' : (p.hasGas === false ? '不通燃气' : '未标明'),
                 水电: p.utilities,
-                卖点: p.sellingPoints || p.features
+                卖点: p.sellingPoints || p.features,
+                "内部私密备注(仅供参考)": p.remarks,
+                商住类型: p.commercialType === 'scattered' ? '散套 (同层办公)' : (p.commercialType === 'whole_floor' ? '整层 (改造公寓)' : '整栋 (纯公寓)'),
+                拿地年份: p.landYear,
+                建筑年代: p.buildingYear
               })))}`
             }
           ]
@@ -1809,6 +1835,10 @@ export default function App() {
                       nearbyFacilities: '',
                       saleFloor: '',
                       saleArea: '',
+                      remarks: '',
+                      commercialType: 'scattered',
+                      landYear: '2016前',
+                      buildingYear: '2000左右',
                       projectBrief: '',
                       imageUrl: '',
                       videoUrl: '',
@@ -1897,7 +1927,7 @@ export default function App() {
                              {prop.name}
                            </h3>
                            <div className="flex items-center gap-1.5 px-1">
-                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{prop.area.replace(/区$/, '')}</span>
+                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{(prop.area || '').replace(/新区$/, '').replace(/区$/, '')}</span>
                            </div>
                          </div>
 
@@ -2095,7 +2125,7 @@ export default function App() {
                               </div>
                               <div>
                                 <div className="font-black text-sm text-slate-800">{p.name}</div>
-                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{p.area.replace(/[区|新区]$/, '')} · {p.totalPrice}</div>
+                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{(p.area || '').replace(/(新区|区)$/, '')} · {p.totalPrice}</div>
                               </div>
                             </div>
                             <button 
@@ -2568,6 +2598,50 @@ export default function App() {
                     </div>
                  </div>
 
+                  <div className="px-10 pb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">商住分类</label>
+                      <select 
+                        value={editingProp.commercialType || 'scattered'}
+                        onChange={e => setEditingProp({ ...editingProp, commercialType: e.target.value as any })}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
+                      >
+                        <option value="scattered">散套 (同层办公)</option>
+                        <option value="whole_floor">整层 (改造公寓)</option>
+                        <option value="whole_building">整栋 (纯公寓)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">拿地年份</label>
+                      <input 
+                        type="text"
+                        value={editingProp.landYear || ''}
+                        onChange={e => setEditingProp({ ...editingProp, landYear: e.target.value })}
+                        placeholder="如：2012"
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">建筑/竣工年代</label>
+                      <input 
+                        type="text"
+                        value={editingProp.buildingYear || ''}
+                        onChange={e => setEditingProp({ ...editingProp, buildingYear: e.target.value })}
+                        placeholder="如：2000"
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="px-10 pb-6 -mt-4">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">私密备注 (仅自己可见，AI 推荐时会参考)</label>
+                    <textarea 
+                      value={editingProp.remarks || ''}
+                      onChange={e => setEditingProp({ ...editingProp, remarks: e.target.value })}
+                      placeholder="如：凯旋门户型不太好，建议少推；此房主诚心卖，可大刀..."
+                      className="w-full h-24 px-6 py-5 bg-slate-100/50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-amber-500/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed italic"
+                    />
+                  </div>
                  <div className="p-10 pt-0 flex gap-5">
                     <motion.button 
                       whileTap={{ scale: 0.98 }}
@@ -2577,6 +2651,7 @@ export default function App() {
                     >
                       保存并更新档案
                     </motion.button>
+
                     <motion.button 
                       whileTap={{ scale: 0.98 }}
                       whileHover={{ backgroundColor: '#eff6ff' }}
@@ -2712,6 +2787,7 @@ export default function App() {
           <p className="mt-8 text-white/40 text-[10px] font-black tracking-[0.5em] uppercase animate-pulse">拖动图片调整位置 · 滚轮或滑块缩放</p>
         </div>
       )}
+      <GameWidget />
     </div>
   </div>
 );
