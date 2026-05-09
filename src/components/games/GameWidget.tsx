@@ -1,15 +1,16 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Gamepad2, X, Trophy, Puzzle, Bomb, Ghost, Grid3X3, Brain } from 'lucide-react';
+import { Gamepad2, X, Trophy, Puzzle, Bomb, Ghost, Grid3X3, Brain, Sparkles, ScrollText } from 'lucide-react';
 import Game2048 from './Game2048';
 import Sudoku from './Sudoku';
 import Minesweeper from './Minesweeper';
 import Snake from './Snake';
 import MemoryMatch from './MemoryMatch';
+import StoryAdventure from './StoryAdventure';
 
 const GameWidget: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeGame, setActiveGame] = useState<'2048' | 'sudoku' | 'mines' | 'snake' | 'memory'>('2048');
+  const [activeGame, setActiveGame] = useState<'2048' | 'sudoku' | 'mines' | 'snake' | 'memory' | 'story'>('story');
   const constraintsRef = useRef(null);
 
   return (
@@ -48,6 +49,15 @@ const GameWidget: React.FC = () => {
               {/* Header */}
               <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/30 rounded-t-xl">
                 <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg overflow-x-auto no-scrollbar max-w-[220px]">
+                  <button
+                    onClick={() => setActiveGame('story')}
+                    className={`flex flex-shrink-0 items-center gap-1.5 px-2.5 py-1 rounded-md text-[9px] font-bold uppercase transition-all ${
+                      activeGame === 'story' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <ScrollText size={11} className={activeGame === 'story' ? 'text-theme-primary' : ''} />
+                    Adventure
+                  </button>
                   <button
                     onClick={() => setActiveGame('2048')}
                     className={`flex flex-shrink-0 items-center gap-1.5 px-2.5 py-1 rounded-md text-[9px] font-bold uppercase transition-all ${
@@ -104,7 +114,8 @@ const GameWidget: React.FC = () => {
               </div>
 
               {/* Game Body */}
-              <div className="p-4 bg-white rounded-b-xl overflow-y-auto max-h-[400px]">
+              <div className="p-4 bg-white rounded-b-xl overflow-y-auto max-h-[520px]">
+                {activeGame === 'story' && <StoryAdventure />}
                 {activeGame === '2048' && <Game2048 />}
                 {activeGame === 'snake' && <Snake />}
                 {activeGame === 'memory' && <MemoryMatch />}

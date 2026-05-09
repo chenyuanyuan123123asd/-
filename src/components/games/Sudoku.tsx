@@ -5,38 +5,56 @@ const Sudoku: React.FC = () => {
   const [initial, setInitial] = useState<boolean[][]>(Array(9).fill(false).map(() => Array(9).fill(false)));
   const [selected, setSelected] = useState<{r: number, c: number} | null>(null);
 
+  const solveSudoku = (grid: (number | null)[][]): boolean => {
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        if (grid[row][col] === null) {
+          const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
+          for (let num of nums) {
+            if (isValid(grid, row, col, num)) {
+              grid[row][col] = num;
+              if (solveSudoku(grid)) return true;
+              grid[row][col] = null;
+            }
+          }
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  const isValid = (grid: (number | null)[][], row: number, col: number, num: number) => {
+    for (let i = 0; i < 9; i++) {
+      if (grid[row][i] === num) return false;
+      if (grid[i][col] === num) return false;
+      const r = 3 * Math.floor(row / 3) + Math.floor(i / 3);
+      const c = 3 * Math.floor(col / 3) + i % 3;
+      if (grid[r][c] === num) return false;
+    }
+    return true;
+  };
+
   const generateSudoku = () => {
-    // Very basic generator for demo purposes
-    const newBoard = Array(9).fill(null).map(() => Array(9).fill(null));
+    const newBoard: (number | null)[][] = Array(9).fill(null).map(() => Array(9).fill(null));
+    solveSudoku(newBoard);
+    
+    const puzzle = newBoard.map(row => [...row]);
     const newInitial = Array(9).fill(false).map(() => Array(9).fill(false));
     
-    // Fill diagonal boxes
-    for (let i = 0; i < 9; i += 3) {
-      fillBox(newBoard, i, i);
-    }
-    
-    // Minimal valid check and removal (simulated puzzle)
+    // Remove some numbers to create the puzzle
     for (let i = 0; i < 9; i++) {
       for (let j = 0; j < 9; j++) {
-        if (Math.random() < 0.6) {
-          newInitial[i][j] = true;
+        if (Math.random() > 0.4) {
+          puzzle[i][j] = null;
         } else {
-          newBoard[i][j] = null;
+          newInitial[i][j] = true;
         }
       }
     }
 
-    setBoard(newBoard);
+    setBoard(puzzle);
     setInitial(newInitial);
-  };
-
-  const fillBox = (grid: any[][], row: number, col: number) => {
-    let nums = [1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 3; j++) {
-        grid[row + i][col + j] = nums.pop();
-      }
-    }
   };
 
   useEffect(() => {
