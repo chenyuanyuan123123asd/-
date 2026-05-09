@@ -111,7 +111,7 @@ interface Property {
   landYear?: string; // 拿地年份
   buildingYear?: string; // 竣工年份
   projectImages?: string[]; // 项目资料图片
-  videoUrl?: string; // 房源视频
+  videoUrl?: string; // 项目视频
   briefBlocks?: BriefBlock[]; // 新版：图文视频穿插资料
   createdAt: number;
   userId?: string;
@@ -250,6 +250,13 @@ export default function App() {
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [extractText, setExtractText] = useState('');
   const [extractImages, setExtractImages] = useState<string[]>([]);
@@ -370,7 +377,7 @@ export default function App() {
           setProperties(props.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
         }, (err) => {
           handleFirestoreError(err, OperationType.LIST, 'properties');
-          setError(`房源同步失败: ${err.message}`);
+          setError('项目档案同步中...');
         });
 
         // Sync Broadcast Templates
@@ -390,7 +397,7 @@ export default function App() {
           setBroadcastTemplates(broadList);
         }, (err) => {
           handleFirestoreError(err, OperationType.LIST, 'broadcastTemplates');
-          setError(`模板同步失败: ${err.message}`);
+          setError('模板资料同步异常');
         });
 
         // CRITICAL: Cleanup nested subscriptions when the auth listener triggers again or unmounts
@@ -448,7 +455,11 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      setError(`登录/注册失败: ${err.message}`);
+      let msg = '服务器连接异常，请检查网络';
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = '用户名或密码错误，请核对后重试';
+      if (err.code === 'auth/network-request-failed') msg = '网络连接不稳定，请检查您的网络设置';
+      if (err.message?.includes('network-request-failed')) msg = '网络连接不稳定，请检查网络';
+      setError(msg);
     } finally {
       setIsAuthLoading(false);
     }
@@ -767,7 +778,7 @@ export default function App() {
       const avgP = ensureString(extracted.均价);
       
       const propData = {
-        name: ensureString(extracted.项目名) || "未命名房源",
+        name: ensureString(extracted.项目名) || "未命名项目",
         area: ensureString(extracted.区域),
         address: ensureString(extracted.地址),
         totalPrice: totalP,
@@ -791,7 +802,7 @@ export default function App() {
         userId: auth.currentUser?.uid
       };
 
-      if (!propData.userId) throw new Error("用户未登录，无法保存房源");
+      if (!propData.userId) throw new Error("用户未登录，无法保存资料");
 
       await addDoc(collection(db, "properties"), propData);
 
@@ -800,7 +811,7 @@ export default function App() {
       setActiveTab("database");
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, "properties");
-      setError(`AI 解析失败: ${err.message}`);
+      setError('AI 智能识别遇到异常，请重试');
     } finally {
       setIsExtracting(false);
     }
@@ -833,18 +844,18 @@ export default function App() {
       const systemPrompt = `你是一个拥有10年经验、带看成交量全城第一的【顶级金牌房地产销冠】。
       
       你的沟通风格：
-      1. 【金牌顾问风范】：谈吐专业、自信且沉稳。你不仅懂房子，还博古通今，比如能适度聊聊风水（如“明堂开阔”、“藏风聚气”等意头）、区域规划、金融信贷甚至本地生活趣闻。
-      2. 【循序渐进】：不要刚一上来就狂轰乱炸式推销。先介绍最核心的配套和房源硬实力，如果能聊开，再根据房子特点发散深度内容。
-      3. 【邀约导向】：你的终极目标是把客户【约出来带看】！网上的咨询只是铺垫，要通过引导“只有实地才能体验的采光/质感”等钩子，暗示好房源稍纵即逝，促使客户到场。
-      4. 【逼单艺术】：逼单要隐秘而坚定（软硬兼施），不要咄咄逼人，而是以“为客户利益着想”的姿态（如：下周排队人可能更多、这套位置是最后一两套等）。
+      1. 【直入主题】：严禁加“某先生/某小姐”、“您好”之类的客套称呼，直接输出。
+      2. 【优势为王】：首轮对话必须优先展示房源的【核心优势】（地段、单价对比、地铁距离、房源卖点）。
+      3. 【极其克制】：严厉禁止主动约看、严厉禁止提及风水建议。
+      4. 【被动回答】：只有当客户对某点表现出明确兴趣并追问时，才开始发散性深入交流。
       
       核心准则：
-      1. 优先在用户指定的区域中寻找匹配房源。
-      2. 如果指定区域内没有完美契合的项目，你【必须】跳出区域限制，在全上海范围内寻找更契合用户核心需求（如单价、总价、燃气、通勤）的替代方案。
-      3. 在推荐跨区房源时，给出高情商理由。
+      1. 优先在用户指定的区域中寻找匹配项目。
+      2. 如果指定区域内没有项目，你【必须】根据用户的单价/总价等核心需求，在全上海范围内寻找替代方案。
+      3. 推荐替代方案时，直接说明为何该方案更适合。
       
       【关键指令 - 内部备注处理】：
-      房源数据中包含【内部备注】，这是只能你看、绝不能原话告诉客户的“私密情报”（如：某项目户型有点怪、采光有遮挡等）。
+      房源数据中包含【内部资料】，这是只能你看、绝不能原话告诉客户的信息（如：该项目目前销售进度、剩余房源的楼层优劣等）。
       - 如果备注是【缺点】：请你尽量少推或者在推荐时有技巧地避开，或者给出化解建议。
       - 如果备注是【亮点】：作为你的杀手锏展示。
       
@@ -893,7 +904,7 @@ export default function App() {
       setMatchHistory(newHistory);
       setMatchRequest('');
     } catch (err: any) {
-      setError(`方案生成失败: ${err.message}`);
+      setError('匹配方案生成遇到异常，请重试');
     } finally {
       setIsMatching(false);
     }
@@ -1092,7 +1103,7 @@ export default function App() {
 
     const currentImages = editingProp.projectImages || [];
     if (currentImages.length + files.length > 18) {
-      setError('资料图片每套房源最多 18 张');
+      setError('资料图片每个项目最多 18 张');
       return;
     }
 
@@ -1119,7 +1130,7 @@ export default function App() {
         const totalSize = calculateTotalSize(nextImages);
         
         if (totalSize > 800 * 1024) {
-          setError('房源总附件大小已接近云端存储限制，请分批或使用更小的图片');
+          setError('项目总附件大小已接近云端存储限制，请分批或使用更小的图片');
           return;
         }
 
@@ -1135,7 +1146,7 @@ export default function App() {
 
   const aiBroadcast = async () => {
     if (selectedPropIds.length === 0) {
-      setError('请先勾选需要生成的房源');
+      setError('请先勾选需要生成的项目');
       return;
     }
     setIsBroadcasting(true);
@@ -1149,25 +1160,27 @@ export default function App() {
         systemPrompt = `你是一个拥有销冠思维的房地产文案专家。请直接基于用户提供的【文案基础/模板】进行生成。
         
         【性格设定】：
-        你是个谈笑间就能成交的老练经纪人。言语中透着专业、懂行，不仅聊地段，还懂生活品质和一点玄学/风水。
+        言辞干练，只讲利益点。
         
         【核心指令】：
-        1. 【绝对长度对齐】：严格遵守模板长度！如果用户选的是短模板，你的输出【必须】极其精简（50-100字内）。严禁废话，严禁扩写！
-        2. 【无痕事实核查】：严禁编造。若数据与常识不符（如不通燃气），请自然融入优势化解，而非直白报错。
-        3. 【内部备注运用】：参考房源的【内部备注】，避开客户忌讳的缺点，放大卖点。但注意备注内容仅供你参考，不可直白说出。
-        4. 【变量替换】：占位符必须替换。区域名简短化（去“区”）。
-        5. 【格式限制】：纯文字+Emoji，严禁使用任何 Markdown 符号（如 ** 或 #）。`;
+        1. 【不要称呼】：严禁加“先生/女士”或“亲爱的客户”，直接输出房源信息。
+        2. 【优势优先】：开头第一句必须是该房源最能打动的核心优势。
+        3. 【绝不主动】：严禁主动提约看、严禁提玄学或风水。
+        4. 【绝对长度对齐】：严格遵守模板长度！如果选的是短模板，输出必须极其精简。
+        5. 【无痕事实核查】：严禁编造。
+        6. 【内部备注运用】：参考【内部备注】，自动避开致命缺点，放大亮点。
+        7. 【格式限制】：纯文字+Emoji，严禁 Markdown。`;
       } else {
-        systemPrompt = `你是一个上海成交金额过亿的【金牌顶级房地产销冠】。请为选中的房源生成一段极具杀伤力的、足以让客户立刻回电的群发文案。
+        systemPrompt = `你是一个成交金额过亿的【金牌顶级房地产销冠】。请生成一段极具诱惑力且真实的房源资料。
         
-        【销冠特质】：
-        - 专业博学：除了房子，你还随口能聊几句区域背山面水（风水）、板块潜力和资产配置。
-        - 循序渐进：文案要有画面感，勾引客户实地带看的欲望。
-        - 极简主义：字数要精炼，不讲废话。
+        【原则】：
+        - 零客套：不要打招呼，直接发房源。
+        - 优势为核心：单价优势、地段绝版、地铁零距离是重点。
+        - 严禁玄学建议，严禁主动提约看。
         
         【核心准则】：
         1. 【事实第一】：仔细核查燃气、水电、梯户比等。
-        2. 【内部备注避坑】：参考房源备注，不要推备注中提到有明显暗伤的房子，除非该暗伤能被性价比抹平。
+        2. 【内部备注避坑】：参考备注，智能避开项目雷点。
         3. 【排版呼吸感】：多用 Emoji。
         4. 区域名去后缀。严禁 Markdown。`;
       }
@@ -1240,7 +1253,7 @@ export default function App() {
       setEditingProp(null);
     } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `properties/${updated.id}`);
-      setError(`更新失败: ${err.message}`);
+      setError('更新档案失败，请检查网络');
     }
   };
 
@@ -1301,7 +1314,7 @@ export default function App() {
               <h1 className="text-3xl font-serif font-black text-slate-800">上海公寓小助手</h1>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">APARTMENT ASSISTANT</p>
             </div>
-            <p className="text-slate-400 font-medium italic pt-4 px-4">输入用户名即可锁定您的云端房源</p>
+            <p className="text-slate-400 font-medium italic pt-4 px-4">输入用户名即可锁定您的云端档案中心</p>
           </div>
 
           {error && (
@@ -1408,13 +1421,13 @@ export default function App() {
           </div>
 
           <nav className="hidden md:flex bg-white/50 backdrop-blur-md p-1.5 rounded-full border border-white/60 shadow-lg">
-            {[
-              { id: 'database', label: '房源管理', icon: Database },
-              { id: 'input', label: 'AI 录入', icon: Plus },
-              { id: 'match', label: '客户匹配', icon: Search },
-              { id: 'broadcast', label: '群发助手', icon: Send },
-              { id: 'config', label: '系统设置', icon: Settings }
-            ].map(tab => (
+              {[
+                { id: 'database', label: '项目库', icon: Database },
+                { id: 'input', label: 'AI 录入', icon: Plus },
+                { id: 'match', label: '客户匹配', icon: Search },
+                { id: 'broadcast', label: '群发助手', icon: Send },
+                { id: 'config', label: '界面设置', icon: Settings }
+              ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
@@ -1467,11 +1480,11 @@ export default function App() {
               </div>
               <div className="space-y-6">
                 {[
-                  { id: 'database', label: '房源管理', icon: Database },
+                  { id: 'database', label: '项目库', icon: Database },
                   { id: 'input', label: 'AI 录入', icon: Plus },
                   { id: 'match', label: '客户匹配', icon: Search },
                   { id: 'broadcast', label: '群发助手', icon: Send },
-                  { id: 'config', label: '系统设置', icon: Settings }
+                  { id: 'config', label: '设置', icon: Settings }
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -1499,28 +1512,28 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <main className="max-w-6xl mx-auto p-4 md:p-10 pb-40 md:pb-10 relative overflow-hidden">
-        {/* Error Alert */}
-        <AnimatePresence>
-          {error && (
-            <motion.div 
-              initial={{ opacity: 0, y: -40, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -40, scale: 0.9 }}
-              className="mb-8 p-6 bg-white/80 backdrop-blur-xl border-4 border-rose-100 rounded-[2.5rem] flex items-start gap-4 text-rose-500 shadow-2xl z-40 relative"
-            >
-              <AlertCircle className="w-6 h-6 mt-0.5 flex-shrink-0" />
-              <div className="flex-grow">
-                <h4 className="font-bold mb-1">操作遇到了点问题</h4>
-                <p className="text-sm opacity-80 leading-relaxed">{error}</p>
-              </div>
-              <button onClick={() => setError(null)} className="p-2 hover:bg-rose-100 rounded-xl transition-all">
-                <Trash2 className="w-5 h-5" />
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+      <AnimatePresence>
+        {error && (
+          <motion.div 
+            initial={{ opacity: 0, x: 40, scale: 0.9 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: 40, scale: 0.9 }}
+            className="fixed bottom-6 right-6 w-[360px] p-5 bg-white/95 backdrop-blur-3xl border border-slate-200 rounded-3xl flex items-start gap-4 text-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.1)] z-[10001] overflow-hidden"
+          >
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500" />
+            <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-rose-500" />
+            <div className="flex-grow">
+              <h4 className="font-black text-xs uppercase tracking-widest text-slate-400 mb-1">系统通知</h4>
+              <p className="text-sm font-bold leading-relaxed">{error}</p>
+            </div>
+            <button onClick={() => setError(null)} className="p-1.5 hover:bg-slate-100 rounded-lg transition-all">
+              <X className="w-4 h-4 text-slate-400" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
+      <main className="max-w-6xl mx-auto p-4 md:p-10 pb-40 md:pb-10 relative overflow-hidden">
         {/* --- Content Modules --- */}
         <div className="space-y-12">
           
@@ -1729,7 +1742,7 @@ export default function App() {
                 </div>
                 <h2 className="text-3xl font-black text-slate-800 font-serif tracking-tight">智能信息识别</h2>
                 <p className="text-slate-400 text-sm max-w-md font-medium leading-relaxed">
-                   粘贴销售笔记或群消息，甚至上传多张推介图片，AI 将自动分析并录入房源库。
+                   粘贴销售笔记或群消息，甚至上传多张推介图片，AI 将自动分析并录入项目库。
                 </p>
               </div>
 
@@ -1810,8 +1823,8 @@ export default function App() {
                     <Database className="w-6 h-6" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-black text-slate-900 font-serif leading-none">房源库房源</h2>
-                    <p className="text-[10px] font-black text-slate-400 tracking-widest mt-2 opacity-70 uppercase">PROJECT REPOSITORY</p>
+                    <h2 className="text-2xl font-black text-slate-900 font-serif leading-none">一手档案中心</h2>
+                    <p className="text-[10px] font-black text-slate-400 tracking-widest mt-2 opacity-70 uppercase">FIRST-HAND PROJECTS</p>
                   </div>
                   <span className="bg-slate-900 text-white text-[12px] px-4 py-1 rounded-full font-black ml-4 shadow-xl">
                     {properties.length}
@@ -1847,7 +1860,7 @@ export default function App() {
                   }}
                   className={`flex items-center gap-2 text-sm font-black ${t.primary} bg-white px-5 py-2.5 rounded-2xl shadow-sm hover:shadow-md transition-all border border-slate-50`}
                 >
-                  <Plus className="w-4 h-4" /> 录入房源
+                  <Plus className="w-4 h-4" /> 录入新项目
                 </motion.button>
               </div>
 
@@ -1876,8 +1889,8 @@ export default function App() {
                     <Database className="w-12 h-12 text-slate-100" />
                   </div>
                   <div className="space-y-3">
-                    <h3 className="font-black text-3xl text-slate-300 font-serif italic">暂无房源记录</h3>
-                    <p className="text-slate-300 font-bold max-w-sm mx-auto leading-relaxed uppercase tracking-tighter text-sm">请通过 AI 扫描录入您的房源信息。</p>
+                    <h3 className="font-black text-3xl text-slate-300 font-serif italic">暂无相关项目</h3>
+                    <p className="text-slate-300 font-bold max-w-sm mx-auto leading-relaxed uppercase tracking-tighter text-sm">请通过 AI 扫描录入您的项目档案。</p>
                   </div>
                 </div>
               ) : (
@@ -1954,7 +1967,7 @@ export default function App() {
                             <button 
                               onClick={(e) => { e.stopPropagation(); downloadProjectBrief(prop); }}
                               className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 hover:bg-blue-500 hover:text-white transition-all flex items-center justify-center shadow-sm border border-blue-100"
-                              title="下载房源资料"
+                              title="下载资料简报"
                             >
                                <Download className="w-4 h-4" />
                             </button>
@@ -2101,7 +2114,7 @@ export default function App() {
                     <div className="flex items-center justify-between mb-6 px-2">
                       <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                          <Home className="w-4 h-4" />
-                         已选房源数据池
+                         已选项目数据池
                       </h4>
                       <span className="bg-slate-900 text-white px-2.5 py-0.5 rounded-md text-[10px] font-black">{selectedPropIds.length}</span>
                     </div>
@@ -2110,7 +2123,7 @@ export default function App() {
                       {selectedPropIds.length === 0 ? (
                         <div className="py-10 flex flex-col items-center justify-center text-center space-y-3 opacity-20">
                            <Database className="w-10 h-10" />
-                           <p className="text-[10px] font-black uppercase tracking-widest">请在房源管理中勾选房源</p>
+                           <p className="text-[10px] font-black uppercase tracking-widest">请在项目档案中勾选项目</p>
                         </div>
                       ) : (
                         properties.filter(p => selectedPropIds.includes(p.id)).map(p => (
@@ -2344,7 +2357,7 @@ export default function App() {
               >
                  <div className="flex items-center justify-between p-10 border-b border-slate-50 sticky top-0 bg-white/90 backdrop-blur-md z-20">
                     <div>
-                        <h3 className="text-3xl font-black text-slate-900 font-serif">编辑房源明细</h3>
+                        <h3 className="text-3xl font-black text-slate-900 font-serif">编辑项目档案</h3>
                         <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mt-1">Refine Project Specifications</p>
                     </div>
                     <button onClick={() => setEditingProp(null)} className="p-3 hover:bg-slate-50 rounded-full transition-colors group">
@@ -2473,7 +2486,7 @@ export default function App() {
                          />
                        </div>
                        <div className="space-y-3">
-                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">房源停车月租</label>
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">项目停车费用</label>
                          <input 
                            value={editingProp.parking || ''}
                            onChange={e => setEditingProp({ ...editingProp, parking: e.target.value })}
@@ -2499,6 +2512,7 @@ export default function App() {
                            className="w-full h-24 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed"
                          />
                        </div>
+                    </div>
                        <div className="col-span-full space-y-3">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">核心卖点提炼</label>
                          <textarea 
@@ -2507,6 +2521,7 @@ export default function App() {
                            className="w-full h-32 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed"
                          />
                        </div>
+
                        <div className="col-span-full space-y-3">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">配套设施说明</label>
                          <textarea 
@@ -2515,6 +2530,7 @@ export default function App() {
                            className="w-full h-32 px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed"
                          />
                        </div>
+
                        <div className="col-span-full space-y-6 pt-6 border-t border-slate-100">
                           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div>
@@ -2554,94 +2570,81 @@ export default function App() {
                           </div>
 
                           <div className="space-y-4">
-                             {(editingProp.briefBlocks || []).length > 0 ? (
-                               (editingProp.briefBlocks || []).map((block, bIdx) => (
-                                 <motion.div 
-                                   layout
-                                   key={block.id} 
-                                   className="relative group bg-slate-50/50 rounded-[2rem] p-6 border-2 border-slate-100/50"
+                             {(editingProp.briefBlocks || []).map((block) => (
+                               <motion.div 
+                                 layout
+                                 key={block.id} 
+                                 className="relative group bg-slate-50/50 rounded-[2rem] p-6 border-2 border-slate-100/50"
+                               >
+                                 <div className="absolute -left-12 top-1/2 -translate-y-1/2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                    <button onClick={() => moveBlock(block.id, 'up')} className="p-2 bg-white shadow-md rounded-full text-slate-400 hover:text-blue-500"><ChevronUp className="w-4 h-4" /></button>
+                                    <button onClick={() => moveBlock(block.id, 'down')} className="p-2 bg-white shadow-md rounded-full text-slate-400 hover:text-blue-500 rotate-180"><ChevronUp className="w-4 h-4" /></button>
+                                 </div>
+
+                                 <button 
+                                   onClick={() => removeBlock(block.id)}
+                                   className="absolute -right-3 -top-3 p-2 bg-rose-500 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all z-10"
                                  >
-                                   <div className="absolute -left-12 top-1/2 -translate-y-1/2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                                      <button onClick={() => moveBlock(block.id, 'up')} className="p-2 bg-white shadow-md rounded-full text-slate-400 hover:text-blue-500"><ChevronUp className="w-4 h-4" /></button>
-                                      <button onClick={() => moveBlock(block.id, 'down')} className="p-2 bg-white shadow-md rounded-full text-slate-400 hover:text-blue-500 rotate-180"><ChevronUp className="w-4 h-4" /></button>
+                                   <X className="w-4 h-4" />
+                                 </button>
+
+                                 {block.type === 'text' ? (
+                                   <textarea 
+                                     value={block.content}
+                                     onChange={(e) => updateBlock(block.id, e.target.value)}
+                                     placeholder="输入该段落的介绍文字..."
+                                     className="w-full min-h-[80px] bg-transparent outline-none resize-none font-bold text-slate-800 text-lg leading-relaxed placeholder:text-slate-300"
+                                   />
+                                 ) : (
+                                   <div className="relative rounded-2xl overflow-hidden shadow-sm">
+                                     <img src={block.content} className="w-full h-auto object-cover max-h-[400px]" />
                                    </div>
-
-                                   <button 
-                                     onClick={() => removeBlock(block.id)}
-                                     className="absolute -right-3 -top-3 p-2 bg-rose-500 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all z-10"
-                                   >
-                                     <X className="w-4 h-4" />
-                                   </button>
-
-                                   {block.type === 'text' ? (
-                                     <textarea 
-                                       value={block.content}
-                                       onChange={(e) => updateBlock(block.id, e.target.value)}
-                                       placeholder="输入该段落的介绍文字..."
-                                       className="w-full min-h-[80px] bg-transparent outline-none resize-none font-bold text-slate-800 text-lg leading-relaxed placeholder:text-slate-300"
-                                     />
-                                   ) : (
-                                     <div className="relative rounded-2xl overflow-hidden shadow-sm">
-                                       <img src={block.content} className="w-full h-auto object-cover max-h-[400px]" />
-                                     </div>
-                                   )}
-                                 </motion.div>
-                               ))
-                             ) : (
-                               <div className="py-20 flex flex-col items-center justify-center text-center opacity-20 filter grayscale">
-                                 <Database className="w-16 h-16 mb-4" />
-                                 <p className="font-black">开始构建您的图文深度资料</p>
-                               </div>
-                             )}
+                                 )}
+                               </motion.div>
+                             ))}
                           </div>
                        </div>
-                    </div>
-                 </div>
+                        <div className="pt-14 border-t border-slate-100 space-y-12">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                             <div className="space-y-3">
+                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">商住分类</label>
+                               <select 
+                                 value={editingProp.commercialType || 'scattered'}
+                                 onChange={e => setEditingProp({ ...editingProp, commercialType: e.target.value as any })}
+                                 className="w-full px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-bold text-slate-800 appearance-none cursor-pointer"
+                               >
+                                 <option value="scattered">散套 (同层办公)</option>
+                                 <option value="whole_floor">整层 (改造公寓)</option>
+                                 <option value="whole_building">整栋 (纯公寓)</option>
+                               </select>
+                             </div>
+                             <div className="space-y-3">
+                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">建筑/竣工年代</label>
+                               <input 
+                                 type="text"
+                                 value={editingProp.buildingYear || ''}
+                                 onChange={e => setEditingProp({ ...editingProp, buildingYear: e.target.value })}
+                                 placeholder="如：2000"
+                                 className="w-full px-6 py-5 bg-slate-50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-blue-500/10 outline-none transition-all font-bold text-slate-800"
+                                />
+                             </div>
+                          </div>
 
-                  <div className="px-10 pb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">商住分类</label>
-                      <select 
-                        value={editingProp.commercialType || 'scattered'}
-                        onChange={e => setEditingProp({ ...editingProp, commercialType: e.target.value as any })}
-                        className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
-                      >
-                        <option value="scattered">散套 (同层办公)</option>
-                        <option value="whole_floor">整层 (改造公寓)</option>
-                        <option value="whole_building">整栋 (纯公寓)</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">拿地年份</label>
-                      <input 
-                        type="text"
-                        value={editingProp.landYear || ''}
-                        onChange={e => setEditingProp({ ...editingProp, landYear: e.target.value })}
-                        placeholder="如：2012"
-                        className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">建筑/竣工年代</label>
-                      <input 
-                        type="text"
-                        value={editingProp.buildingYear || ''}
-                        onChange={e => setEditingProp({ ...editingProp, buildingYear: e.target.value })}
-                        placeholder="如：2000"
-                        className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-theme-primary/10 outline-none transition-all font-bold text-slate-800"
-                      />
-                    </div>
+                          <div className="border-t border-slate-100 pt-10 pb-4">
+                             <div className="space-y-4">
+                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">内部项目资料 (仅内部参考)</label>
+                               <textarea 
+                                 value={editingProp.remarks || ''}
+                                 onChange={e => setEditingProp({ ...editingProp, remarks: e.target.value })}
+                                 placeholder="请输入项目内部资料，如：高区景观说明、项目剩余房源情况、渠道对接策略等..."
+                                 className="w-full h-48 px-6 py-5 bg-slate-50 border border-slate-100 rounded-[2rem] focus:ring-4 focus:ring-blue-500/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed italic"
+                                />
+                             </div>
+                          </div>
+                       </div>
                   </div>
 
-                  <div className="px-10 pb-6 -mt-4">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">私密备注 (仅自己可见，AI 推荐时会参考)</label>
-                    <textarea 
-                      value={editingProp.remarks || ''}
-                      onChange={e => setEditingProp({ ...editingProp, remarks: e.target.value })}
-                      placeholder="如：凯旋门户型不太好，建议少推；此房主诚心卖，可大刀..."
-                      className="w-full h-24 px-6 py-5 bg-slate-100/50 border border-slate-100 rounded-3xl focus:ring-4 focus:ring-amber-500/10 outline-none transition-all resize-none font-bold text-slate-800 leading-relaxed italic"
-                    />
-                  </div>
+
                  <div className="p-10 pt-0 flex gap-5">
                     <motion.button 
                       whileTap={{ scale: 0.98 }}
@@ -2674,7 +2677,7 @@ export default function App() {
                       whileHover={{ backgroundColor: '#fef2f2', color: '#ef4444' }}
                       onClick={() => editingProp && handleDeleteProp(editingProp.id)}
                       className="p-5 border-2 border-red-50 text-red-100 rounded-[2rem] transition-all"
-                      title="删除房源"
+                      title="删除项目"
                     >
                       <Trash2 className="w-5 h-5" />
                     </motion.button>
@@ -2704,9 +2707,9 @@ export default function App() {
               <div className="w-20 h-20 bg-rose-50 rounded-[2rem] flex items-center justify-center text-rose-500 mb-6 shadow-inner">
                 <Trash2 className="w-10 h-10" />
               </div>
-              <h3 className="text-2xl font-black text-slate-900 font-serif mb-2">确认删除房源？</h3>
+              <h3 className="text-2xl font-black text-slate-900 font-serif mb-2">确认删除项目档案？</h3>
               <p className="text-slate-400 font-medium text-sm leading-relaxed mb-10">
-                删除后该房源的所有数据将永久丢失，且无法找回。
+                删除后该项目的所有数据将永久丢失，且无法找回。
               </p>
               <div className="grid grid-cols-2 gap-4 w-full">
                 <button 

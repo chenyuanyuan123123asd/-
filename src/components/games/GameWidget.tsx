@@ -19,17 +19,17 @@ const GameWidget: React.FC = () => {
         dragElastic={0.1}
         dragConstraints={constraintsRef}
         dragMomentum={false}
-        className="absolute bottom-8 left-0 pointer-events-auto"
-        initial={{ x: -20 }}
+        className="absolute bottom-8 right-0 pointer-events-auto"
+        initial={{ x: 20 }}
       >
         <AnimatePresence>
           {!isOpen && (
             <motion.button
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 0.6, x: -15 }}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 0.4, x: 15 }}
               whileHover={{ opacity: 1, x: 0 }}
               onClick={() => setIsOpen(true)}
-              className="w-12 h-10 rounded-r-2xl bg-white/40 backdrop-blur-md flex items-center justify-end pr-3 text-slate-600 shadow-sm border border-white/20 overflow-hidden group border-l-0"
+              className="w-12 h-10 rounded-l-2xl bg-white/40 backdrop-blur-md flex items-center justify-start pl-3 text-slate-600 shadow-sm border border-white/20 overflow-hidden group border-r-0"
               title="Relax..."
             >
               <Gamepad2 size={24} className="transition-transform group-hover:rotate-12" />
@@ -40,10 +40,10 @@ const GameWidget: React.FC = () => {
         <AnimatePresence>
           {isOpen && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, x: 10 }}
-              animate={{ opacity: 1, scale: 1, x: 20 }}
-              exit={{ opacity: 0, scale: 0.9, x: 10 }}
-              className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20 overflow-hidden w-[280px] sm:w-[320px] p-1"
+              initial={{ opacity: 0, scale: 0.9, x: -10 }}
+              animate={{ opacity: 1, scale: 1, x: -20 }}
+              exit={{ opacity: 0, scale: 0.9, x: -10 }}
+              className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20 overflow-hidden w-[280px] sm:w-[320px] p-1 absolute bottom-0 right-0 origin-bottom-right"
             >
               {/* Header */}
               <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/30 rounded-t-xl">
