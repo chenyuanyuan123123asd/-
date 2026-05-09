@@ -108,7 +108,6 @@ interface Property {
   projectBrief?: string; // 项目资料
   remarks?: string; // 内部私密备注(优缺点)
   commercialType?: 'scattered' | 'whole_floor' | 'whole_building'; // 商住类型：散套/整层/整栋
-  landYear?: string; // 拿地年份
   buildingYear?: string; // 竣工年份
   projectImages?: string[]; // 项目资料图片
   videoUrl?: string; // 项目视频
@@ -837,6 +836,7 @@ export default function App() {
         在售面积: p.saleArea,
         核心卖点: p.sellingPoints,
         周边配套: p.nearbyFacilities,
+        竣工年份: p.buildingYear,
         项目资料: p.projectBrief,
         内部备注: p.remarks 
       }));
@@ -844,34 +844,26 @@ export default function App() {
       const systemPrompt = `你是一个拥有10年经验、带看成交量全城第一的【顶级金牌房地产销冠】。
       
       你的沟通风格：
-      1. 【直入主题】：严禁加“某先生/某小姐”、“您好”之类的客套称呼，直接输出。
-      2. 【优势为王】：首轮对话必须优先展示房源的【核心优势】（地段、单价对比、地铁距离、房源卖点）。
-      3. 【极其克制】：严厉禁止主动约看、严厉禁止提及风水建议。
-      4. 【被动回答】：只有当客户对某点表现出明确兴趣并追问时，才开始发散性深入交流。
+      1. 【严禁幻觉】：你【只能】推荐房源库中的项目。严禁推荐库外项目。
+      2. 【直入主题】：除非是“电销话术”模式，否则严禁使用任何客套称呼。
+      3. 【按需输出感性内容】：
+         - 在“微信/群发”模式下：严禁提及风水、严禁主动约看。
+         - 在“电销话术”模式下：可以包含极其有限的礼貌用语（如：您好）、风水意头（如：位居龙脉、财位等）和邀约。
+         - 【核心限制】：任何感性内容占比不得超过10%。只有在用户明确追问“风水怎么样”或“什么时候去看看”时，才允许详细展开。
+      4. 【优势为王】：首段必须直接输出房源的【核心优势】（地段、单价、地铁、配套）。
+      5. 【被动回答】：平时保持克制，只有客户表现出强烈兴趣时才逐步发散。
       
       核心准则：
-      1. 优先在用户指定的区域中寻找匹配项目。
-      2. 如果指定区域内没有项目，你【必须】根据用户的单价/总价等核心需求，在全上海范围内寻找替代方案。
-      3. 推荐替代方案时，直接说明为何该方案更适合。
+      1. 如果库内没有匹配房源，直接告知用户，并仅推荐库内预算最接近的房源。
+      2. 理由必须基于真实数据，严禁编造。
       
       【关键指令 - 内部备注处理】：
-      房源数据中包含【内部资料】，这是只能你看、绝不能原话告诉客户的信息（如：该项目目前销售进度、剩余房源的楼层优劣等）。
-      - 如果备注是【缺点】：请你尽量少推或者在推荐时有技巧地避开，或者给出化解建议。
-      - 如果备注是【亮点】：作为你的杀手锏展示。
-      
-      【专业须知 - 商改住】：
-      我们目前主要销售的是市区“商改住”项目（旧办公楼改造）：
-      - 2016年前拿的地，地标位置绝版。
-      - 建筑年份多在2000年左右。
-      - 散套：同楼层有办公，价格优势大。
-      - 整层：整层全改造为公寓，环境统一。
-      - 整栋：整栋无办公，纯居住公寓。
+      房源包含【内部资料】，仅供你筛选参考。输出时要将负面备注进行话术化解或避开。
       
       具体要求：
-      1. 请仔细分析房源基本信息，挖掘【项目资料】中的细节。
-      2. 一次筛选 1-3 个最符合的项目。
-      3. 严禁使用 **、###、-、* 等 Markdown 符号，保持纯文本换行。
-      4. 当前回复模式：${modePrompt}`;
+      1. 一次推荐 1-3 个项目。
+      2. 严禁使用任何 Markdown 符号（如 ** 或 #），保持纯文本对齐。
+      3. 当前模式：${modePrompt}`;
 
       const currentMessages: MatchMessage[] = isContinue 
         ? [...matchHistory, { role: 'user', content: matchRequest }]
@@ -886,7 +878,10 @@ export default function App() {
         body: JSON.stringify({
           model: config.model,
           messages: [
-            { role: 'system', content: systemPrompt },
+            { 
+              role: 'system', 
+              content: `${systemPrompt}\n\n当前房源库数据（请仅从中选择）：\n${JSON.stringify(propertyContext, null, 2)}` 
+            },
             ...currentMessages
           ]
         })
@@ -1157,32 +1152,27 @@ export default function App() {
       
       let systemPrompt = '';
       if (broadcastTemplate.trim()) {
-        systemPrompt = `你是一个拥有销冠思维的房地产文案专家。请直接基于用户提供的【文案基础/模板】进行生成。
+        systemPrompt = `你是一个拥有销冠思维的房地产文案专家。请基于【库内房源】生成文案。
         
         【性格设定】：
-        言辞干练，只讲利益点。
+        干练专业，默认零客套。
         
         【核心指令】：
-        1. 【不要称呼】：严禁加“先生/女士”或“亲爱的客户”，直接输出房源信息。
-        2. 【优势优先】：开头第一句必须是该房源最能打动的核心优势。
-        3. 【绝不主动】：严禁主动提约看、严禁提玄学或风水。
-        4. 【绝对长度对齐】：严格遵守模板长度！如果选的是短模板，输出必须极其精简。
-        5. 【无痕事实核查】：严禁编造。
-        6. 【内部备注运用】：参考【内部备注】，自动避开致命缺点，放大亮点。
-        7. 【格式限制】：纯文字+Emoji，严禁 Markdown。`;
+        1. 【严禁幻觉】：只推荐库内真实存在的房源。
+        2. 【按需感性】：默认严禁客套话、风水或主动约看内容。只有当文案模板中包含电销属性时，才允许出现极少量（占比<10%）的礼貌语或意头话。
+        3. 【优势优先】：首句必须是该房源最具杀伤力的硬核优势。
+        4. 【绝对长度对齐】：严格遵守模板长度限制。
+        5. 【格式限制】：纯文字+Emoji，严禁 Markdown。`;
       } else {
-        systemPrompt = `你是一个成交金额过亿的【金牌顶级房地产销冠】。请生成一段极具诱惑力且真实的房源资料。
+        systemPrompt = `你是一个成交金额过亿的【金牌地产销冠】。请生成库内房源资料。
         
         【原则】：
-        - 零客套：不要打招呼，直接发房源。
-        - 优势为核心：单价优势、地段绝版、地铁零距离是重点。
-        - 严禁玄学建议，严禁主动提约看。
+        - 零客套：默认不打招呼，不提风水，不主动邀约。
+        - 仅限库内：严禁推荐非库内项目。
+        - 优势核心：单价、地段、地铁是重点。
         
-        【核心准则】：
-        1. 【事实第一】：仔细核查燃气、水电、梯户比等。
-        2. 【内部备注避坑】：参考备注，智能避开项目雷点。
-        3. 【排版呼吸感】：多用 Emoji。
-        4. 区域名去后缀。严禁 Markdown。`;
+        【核心限制】：
+        只有在被明确要求输出电销话术或被问及风水相关问题时，才允许适度融入感性引导，且必须极其克制。`;
       }
 
       const response = await fetch(config.url, {
@@ -1902,7 +1892,7 @@ export default function App() {
                       whileTap={{ scale: 0.98 }}
                       key={prop.id}
                       onClick={() => setEditingProp(prop)}
-                      className={`group bg-white rounded-[2rem] border p-4 relative flex flex-col cursor-pointer overflow-hidden shadow-sm transition-[border-color,box-shadow,background-color] duration-300 hover:shadow-2xl hover:border-theme-primary/20 aspect-square ${selectedPropIds.includes(prop.id) ? `border-slate-800 ring-4 ring-slate-100 shadow-2xl` : 'border-slate-100'}`}
+                      className={`group bg-white rounded-[2rem] border p-5 relative flex flex-col cursor-pointer overflow-hidden shadow-sm transition-[border-color,box-shadow,background-color] duration-300 hover:shadow-2xl hover:border-theme-primary/20 min-h-[240px] ${selectedPropIds.includes(prop.id) ? `border-slate-800 ring-4 ring-slate-100 shadow-2xl` : 'border-slate-100'}`}
                     >
                       {/* Selection Badge */}
                       <div className="absolute top-2.5 left-2.5 z-20">
