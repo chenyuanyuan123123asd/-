@@ -30,7 +30,7 @@ const GameWidget: React.FC = () => {
 
     timeoutRef.current = setTimeout(() => {
       clickCount.current = 0;
-    }, 400);
+    }, 800);
   };
 
   return (
@@ -38,7 +38,7 @@ const GameWidget: React.FC = () => {
       {/* Hidden trigger area in the bottom-right corner - enlarged to a larger region */}
       <div 
         onClick={handleTriggerClick}
-        className="fixed bottom-0 right-0 w-32 h-32 z-[10000] cursor-default pointer-events-auto transition-colors"
+        className={`fixed bottom-0 right-0 w-32 h-32 cursor-default pointer-events-auto transition-colors ${isVisible ? 'z-[9998]' : 'z-[10001]'}`}
         title=" "
       />
 
